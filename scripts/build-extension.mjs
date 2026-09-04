@@ -1,10 +1,12 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
-import { build } from "vite";
+import { build, loadEnv } from "vite";
 
 const rootDir = process.cwd();
 const distDir = resolve(rootDir, "dist");
+const mode = process.env.MODE ?? process.env.NODE_ENV ?? "production";
+Object.assign(process.env, loadEnv(mode, rootDir, ""));
 
 const assetNames = {
   entryFileNames: "assets/[name].js",
@@ -13,7 +15,11 @@ const assetNames = {
 };
 
 function relayHostPermission() {
-  const origin = process.env.VITE_REMOTE_HTTP_ORIGIN ?? "http://localhost:8787";
+  const origin = process.env.VITE_REMOTE_HTTP_ORIGIN;
+  if (!origin) {
+    throw new Error("VITE_REMOTE_HTTP_ORIGIN is required to build the extension.");
+  }
+
   const url = new URL(origin);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("VITE_REMOTE_HTTP_ORIGIN must use http or https.");

@@ -1,5 +1,5 @@
 export const REMOTE_HTTP_ORIGIN =
-  import.meta.env.VITE_REMOTE_HTTP_ORIGIN ?? "http://localhost:8787";
+  import.meta.env.VITE_REMOTE_HTTP_ORIGIN;
 
 export const REMOTE_WS_ORIGIN =
   import.meta.env.VITE_REMOTE_WS_ORIGIN ??

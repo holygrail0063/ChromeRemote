@@ -30,7 +30,7 @@ export type RemoteSession = {
 const sessionLifetimeMs = 4 * 60 * 60 * 1000;
 const commandWindowMs = 1000;
 const maxCommandsPerWindow = 20;
-const configuredPublicOrigin = process.env.PUBLIC_ORIGIN ?? process.env.REMOTE_WEB_ORIGIN ?? "http://localhost:8787";
+const developmentPublicOrigin = "http://localhost:8787";
 
 const sessions = new Map<string, RemoteSession>();
 
@@ -48,7 +48,7 @@ function secretsEqual(left: string, right: string): boolean {
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-export function createSession(now = Date.now(), publicOrigin = configuredPublicOrigin): SessionTokens {
+export function createSession(now = Date.now(), publicOrigin = developmentPublicOrigin): SessionTokens {
   const sessionId = randomBytes(16).toString("base64url");
   const playerToken = createSecret();
   const controllerToken = createSecret();

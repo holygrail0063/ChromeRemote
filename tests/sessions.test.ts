@@ -96,3 +96,11 @@ test("session remote URL uses supplied public origin", () => {
   assert.equal(tokens.remoteUrl.startsWith("https://chromeremote-production.up.railway.app/r/"), true);
   assert.equal(tokens.remoteUrl.includes("#"), true);
 });
+
+test("session remote URL keeps controller token in fragment", () => {
+  clearSessionsForTests();
+  const tokens = createSession(Date.now(), "https://chromeremote-production.up.railway.app");
+  const url = new URL(tokens.remoteUrl);
+  assert.equal(url.search, "");
+  assert.equal(url.hash.length > 1, true);
+});

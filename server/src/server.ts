@@ -8,7 +8,8 @@ import { handleUpgrade } from "./websocket.js";
 
 const port = Number(process.env.PORT ?? 8787);
 const host = process.env.HOST ?? "0.0.0.0";
-const publicOrigin = (process.env.PUBLIC_ORIGIN ?? "http://localhost:8787").replace(/\/$/, "");
+const developmentPublicOrigin = "http://localhost:8787";
+const publicOrigin = (process.env.PUBLIC_ORIGIN ?? developmentPublicOrigin).replace(/\/$/, "");
 const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? publicOrigin)
   .split(",")
   .map((origin) => origin.trim())
@@ -47,12 +48,23 @@ function getRequestPublicOrigin(request: import("node:http").IncomingMessage): s
     return process.env.PUBLIC_ORIGIN;
   }
 
+  if (isProductionRuntime()) {
+    throw new Error("PUBLIC_ORIGIN is required in production.");
+  }
+
   const forwardedProto = request.headers["x-forwarded-proto"];
   const proto = typeof forwardedProto === "string" ? forwardedProto.split(",")[0].trim() : "http";
   const host = request.headers["x-forwarded-host"] ?? request.headers.host;
   const hostname = Array.isArray(host) ? host[0] : host;
 
   return hostname ? `${proto}://${hostname}` : publicOrigin;
+}
+
+function isProductionRuntime(): boolean {
+  return (
+    process.env.NODE_ENV === "production" ||
+    Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_SERVICE_ID)
+  );
 }
 
 function baseHeaders(request: import("node:http").IncomingMessage): Record<string, string> {
@@ -71,6 +83,14 @@ function sendJson(request: import("node:http").IncomingMessage, response: import
     "content-type": "application/json; charset=utf-8"
   });
   response.end(JSON.stringify(body));
+}
+
+function sendConfigError(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse): void {
+  sendJson(request, response, 500, {
+    ok: false,
+    errorCode: "REMOTE_SERVER_NOT_CONFIGURED",
+    message: "ChromeRemote relay server is not configured."
+  });
 }
 
 async function getStaticRoot(): Promise<string | null> {
@@ -147,7 +167,11 @@ async function handleRequest(request: import("node:http").IncomingMessage, respo
   }
 
   if (request.method === "POST" && request.url === "/api/sessions") {
-    sendJson(request, response, 201, createSession(Date.now(), getRequestPublicOrigin(request)));
+    try {
+      sendJson(request, response, 201, createSession(Date.now(), getRequestPublicOrigin(request)));
+    } catch {
+      sendConfigError(request, response);
+    }
     return;
   }
 
