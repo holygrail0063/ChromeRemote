@@ -275,6 +275,14 @@ function connectSocket(pairing: StoredPairing | null): void {
   });
 
   socket.addEventListener("error", () => {
+    if (storedPairing) {
+      setPairingState({
+        ...pairingState,
+        status: "temporarily-disconnected",
+        errorCode: "WEBSOCKET_CONNECTION_FAILED",
+        error: "ChromeRemote could not connect to the relay WebSocket."
+      });
+    }
     socket?.close();
   });
 }
@@ -319,7 +327,7 @@ async function startPairing(tabId: number, tabUrl: string): Promise<PairingRespo
     const session = await response.json();
     if (!isCreateRemoteSessionResponse(session)) {
       await cleanup(false);
-      return pairingError("MALFORMED_SESSION_RESPONSE", "ChromeRemote relay returned an invalid session response.");
+      return pairingError("SESSION_RESPONSE_INVALID", "ChromeRemote relay returned an invalid session response.");
     }
 
     const nextPairing: StoredPairing = {
@@ -343,7 +351,7 @@ async function startPairing(tabId: number, tabUrl: string): Promise<PairingRespo
   } catch (error) {
     await cleanup(false);
     const message = error instanceof SyntaxError ? "ChromeRemote relay returned an invalid session response." : "ChromeRemote could not reach the relay server.";
-    const errorCode = error instanceof SyntaxError ? "MALFORMED_SESSION_RESPONSE" : "REMOTE_SERVER_UNREACHABLE";
+    const errorCode = error instanceof SyntaxError ? "SESSION_RESPONSE_INVALID" : "REMOTE_SERVER_UNREACHABLE";
     setPairingState({ status: "not-paired", errorCode, error: message });
     return pairingError(errorCode, message);
   }

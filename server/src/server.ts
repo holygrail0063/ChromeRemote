@@ -42,6 +42,19 @@ function getCorsOrigin(request: import("node:http").IncomingMessage): string | u
   return undefined;
 }
 
+function getRequestPublicOrigin(request: import("node:http").IncomingMessage): string {
+  if (process.env.PUBLIC_ORIGIN) {
+    return process.env.PUBLIC_ORIGIN;
+  }
+
+  const forwardedProto = request.headers["x-forwarded-proto"];
+  const proto = typeof forwardedProto === "string" ? forwardedProto.split(",")[0].trim() : "http";
+  const host = request.headers["x-forwarded-host"] ?? request.headers.host;
+  const hostname = Array.isArray(host) ? host[0] : host;
+
+  return hostname ? `${proto}://${hostname}` : publicOrigin;
+}
+
 function baseHeaders(request: import("node:http").IncomingMessage): Record<string, string> {
   const corsOrigin = getCorsOrigin(request);
 
@@ -134,7 +147,7 @@ async function handleRequest(request: import("node:http").IncomingMessage, respo
   }
 
   if (request.method === "POST" && request.url === "/api/sessions") {
-    sendJson(request, response, 201, createSession());
+    sendJson(request, response, 201, createSession(Date.now(), getRequestPublicOrigin(request)));
     return;
   }
 

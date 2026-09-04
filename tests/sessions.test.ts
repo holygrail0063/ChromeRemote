@@ -89,3 +89,10 @@ test("disconnect invalidates a session", () => {
   assert.equal(invalidateSession(tokens.sessionId), true);
   assert.equal(getSession(tokens.sessionId), null);
 });
+
+test("session remote URL uses supplied public origin", () => {
+  clearSessionsForTests();
+  const tokens = createSession(Date.now(), "https://chromeremote-production.up.railway.app/");
+  assert.equal(tokens.remoteUrl.startsWith("https://chromeremote-production.up.railway.app/r/"), true);
+  assert.equal(tokens.remoteUrl.includes("#"), true);
+});
