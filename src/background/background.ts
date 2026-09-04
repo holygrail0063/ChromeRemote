@@ -1,0 +1,396 @@
+import { REMOTE_HTTP_ORIGIN, REMOTE_WS_ORIGIN } from "../shared/remote-config";
+import { getNetflixPageContext } from "../shared/netflix-url";
+import type { PlayerCommand, PlayerResponse } from "../shared/messages";
+import {
+  isCreateRemoteSessionResponse,
+  isPairingRequest,
+  isValidRemoteOrigin,
+  type PairingErrorCode,
+  type PairingRequest,
+  type PairingResponse,
+  type PairingState
+} from "../shared/pairing";
+import { parseRemoteMessage, toRemoteErrorCode, type RemoteServerMessage } from "../shared/remote-protocol";
+
+type StoredPairing = {
+  sessionId: string;
+  playerToken: string;
+  remoteUrl: string;
+  expiresAt: string;
+  pairedTabId: number;
+};
+
+const storageKey = "chromeRemotePairing";
+const stateIntervalMs = 1000;
+const reconnectDelaysMs = [1000, 2000, 5000, 10000, 30000];
+
+let pairingState: PairingState = { status: "not-paired" };
+let storedPairing: StoredPairing | null = null;
+let socket: WebSocket | null = null;
+let reconnectTimer: number | null = null;
+let pollingTimer: number | null = null;
+let reconnectAttempt = 0;
+let disconnecting = false;
+
+chrome.runtime.onInstalled.addListener(() => {
+  void chrome.action.setBadgeText({ text: "" });
+});
+
+function setPairingState(nextState: PairingState): void {
+  pairingState = nextState;
+  try {
+    const result = chrome.runtime.sendMessage({ type: "PAIRING_STATE_CHANGED", state: pairingState });
+    if (result && typeof result === "object" && "catch" in result && typeof result.catch === "function") {
+      result.catch(() => undefined);
+    }
+  } catch {
+    // The popup may be closed; pairing state remains owned by the service worker.
+  }
+}
+
+function pairingError(errorCode: PairingErrorCode, error: string, state: PairingState = pairingState): PairingResponse {
+  return { ok: false, state: { ...state, errorCode, error }, errorCode, error };
+}
+
+async function savePairing(pairing: StoredPairing | null): Promise<void> {
+  storedPairing = pairing;
+  if (pairing) {
+    await chrome.storage.session.set({ [storageKey]: pairing });
+    return;
+  }
+
+  await chrome.storage.session.remove(storageKey);
+}
+
+async function loadPairing(): Promise<StoredPairing | null> {
+  const result = await chrome.storage.session.get(storageKey);
+  const candidate = result[storageKey] as StoredPairing | undefined;
+  if (!candidate || Date.parse(candidate.expiresAt) <= Date.now()) {
+    await savePairing(null);
+    return null;
+  }
+
+  return candidate;
+}
+
+function clearReconnectTimer(): void {
+  if (reconnectTimer !== null) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
+function stopPolling(): void {
+  if (pollingTimer !== null) {
+    clearInterval(pollingTimer);
+    pollingTimer = null;
+  }
+}
+
+function scheduleReconnect(): void {
+  if (!storedPairing || disconnecting || reconnectTimer !== null) {
+    return;
+  }
+
+  const delay = reconnectDelaysMs[Math.min(reconnectAttempt, reconnectDelaysMs.length - 1)];
+  reconnectAttempt += 1;
+  setPairingState({
+    status: "temporarily-disconnected",
+    sessionId: storedPairing.sessionId,
+    remoteUrl: storedPairing.remoteUrl,
+    expiresAt: storedPairing.expiresAt,
+    pairedTabId: storedPairing.pairedTabId
+  });
+
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectSocket(storedPairing);
+  }, delay) as unknown as number;
+}
+
+async function getPairedTabWatchUrl(tabId: number): Promise<string | null> {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    return getNetflixPageContext(tab.url).isWatchPage ? (tab.url ?? null) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function sendCommandToPairedTab(command: PlayerCommand): Promise<PlayerResponse> {
+  if (!storedPairing) {
+    return { ok: false, error: "No active phone pairing.", errorCode: "PLAYER_UNAVAILABLE" };
+  }
+
+  const watchUrl = await getPairedTabWatchUrl(storedPairing.pairedTabId);
+  if (!watchUrl) {
+    return { ok: false, error: "Netflix is no longer available on the paired tab.", errorCode: "PLAYER_UNAVAILABLE" };
+  }
+
+  try {
+    return await chrome.tabs.sendMessage<PlayerCommand, PlayerResponse>(storedPairing.pairedTabId, command);
+  } catch {
+    return { ok: false, error: "ChromeRemote cannot reach the paired Netflix tab.", errorCode: "PLAYER_UNAVAILABLE" };
+  }
+}
+
+async function pushPlayerState(): Promise<void> {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  const response = await sendCommandToPairedTab({ type: "GET_STATE" });
+  if (response.ok && response.state) {
+    socket.send(JSON.stringify({ type: "PLAYER_STATE", state: response.state }));
+    return;
+  }
+
+  if (!response.ok) {
+    socket.send(
+      JSON.stringify({
+        type: "COMMAND_RESULT",
+        requestId: `state-${Date.now()}`,
+        ok: false,
+        errorCode: "PLAYER_UNAVAILABLE",
+        message: response.error
+      })
+    );
+  }
+}
+
+function startPolling(): void {
+  if (pollingTimer !== null) {
+    return;
+  }
+
+  void pushPlayerState();
+  pollingTimer = setInterval(() => {
+    void pushPlayerState();
+  }, stateIntervalMs) as unknown as number;
+}
+
+function sendSocketMessage(message: unknown): void {
+  if (socket?.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify(message));
+  }
+}
+
+function handleServerMessage(message: RemoteServerMessage): void {
+  if (!storedPairing) {
+    return;
+  }
+
+  if (message.type === "AUTH_OK") {
+    reconnectAttempt = 0;
+    setPairingState({
+      status: "waiting",
+      sessionId: storedPairing.sessionId,
+      remoteUrl: storedPairing.remoteUrl,
+      expiresAt: storedPairing.expiresAt,
+      pairedTabId: storedPairing.pairedTabId
+    });
+    return;
+  }
+
+  if (message.type === "CONTROLLER_CONNECTED") {
+    setPairingState({ ...pairingState, status: "connected" });
+    startPolling();
+    return;
+  }
+
+  if (message.type === "CONTROLLER_DISCONNECTED") {
+    setPairingState({ ...pairingState, status: "temporarily-disconnected" });
+    stopPolling();
+    return;
+  }
+
+  if (message.type === "SESSION_EXPIRED") {
+    setPairingState({ ...pairingState, status: "expired", error: "Remote session expired" });
+    void cleanup(false);
+    return;
+  }
+
+  if (message.type === "SESSION_ENDED") {
+    void cleanup(false);
+    return;
+  }
+
+  if (message.type === "COMMAND") {
+    void sendCommandToPairedTab(message.command).then((response) => {
+      const result = response.ok
+        ? { type: "COMMAND_RESULT", requestId: message.requestId, ok: true, state: response.state }
+        : {
+            type: "COMMAND_RESULT",
+            requestId: message.requestId,
+            ok: false,
+            errorCode: toRemoteErrorCode(response.errorCode),
+            message: response.error,
+            state: response.state
+          };
+
+      sendSocketMessage(result);
+      if (response.state) {
+        sendSocketMessage({ type: "PLAYER_STATE", state: response.state });
+      }
+    });
+  }
+}
+
+function connectSocket(pairing: StoredPairing | null): void {
+  if (!pairing) {
+    return;
+  }
+
+  clearReconnectTimer();
+  socket?.close();
+  socket = new WebSocket(`${REMOTE_WS_ORIGIN}/ws`);
+
+  socket.addEventListener("open", () => {
+    sendSocketMessage({
+      type: "AUTH",
+      role: "player",
+      sessionId: pairing.sessionId,
+      token: pairing.playerToken
+    });
+  });
+
+  socket.addEventListener("message", (event) => {
+    try {
+      handleServerMessage(parseRemoteMessage(String(event.data)) as RemoteServerMessage);
+    } catch {
+      sendSocketMessage({
+        type: "COMMAND_RESULT",
+        requestId: "invalid",
+        ok: false,
+        errorCode: "INVALID_MESSAGE",
+        message: "Invalid message."
+      });
+    }
+  });
+
+  socket.addEventListener("close", () => {
+    socket = null;
+    stopPolling();
+    scheduleReconnect();
+  });
+
+  socket.addEventListener("error", () => {
+    socket?.close();
+  });
+}
+
+async function cleanup(invalidateServer: boolean): Promise<void> {
+  disconnecting = true;
+  clearReconnectTimer();
+  stopPolling();
+  socket?.close();
+  socket = null;
+
+  const sessionId = storedPairing?.sessionId;
+  await savePairing(null);
+  setPairingState({ status: "not-paired" });
+
+  if (invalidateServer && sessionId) {
+    fetch(`${REMOTE_HTTP_ORIGIN}/api/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" }).catch(() => undefined);
+  }
+
+  disconnecting = false;
+}
+
+async function startPairing(tabId: number, tabUrl: string): Promise<PairingResponse> {
+  if (!getNetflixPageContext(tabUrl).isWatchPage) {
+    return pairingError("NOT_NETFLIX_WATCH_PAGE", "Open a Netflix movie or episode before connecting a phone.");
+  }
+
+  if (!isValidRemoteOrigin(REMOTE_HTTP_ORIGIN) || !isValidRemoteOrigin(REMOTE_WS_ORIGIN)) {
+    return pairingError("REMOTE_SERVER_NOT_CONFIGURED", "ChromeRemote relay server is not configured.");
+  }
+
+  await cleanup(false);
+  setPairingState({ status: "creating", pairedTabId: tabId });
+
+  try {
+    const response = await fetch(`${REMOTE_HTTP_ORIGIN}/api/sessions`, { method: "POST" });
+    if (!response.ok) {
+      await cleanup(false);
+      return pairingError("SESSION_CREATE_FAILED", "ChromeRemote could not create a phone session.");
+    }
+
+    const session = await response.json();
+    if (!isCreateRemoteSessionResponse(session)) {
+      await cleanup(false);
+      return pairingError("MALFORMED_SESSION_RESPONSE", "ChromeRemote relay returned an invalid session response.");
+    }
+
+    const nextPairing: StoredPairing = {
+      sessionId: session.sessionId,
+      playerToken: session.playerToken,
+      remoteUrl: session.remoteUrl,
+      expiresAt: session.expiresAt,
+      pairedTabId: tabId
+    };
+
+    await savePairing(nextPairing);
+    setPairingState({
+      status: "waiting",
+      sessionId: session.sessionId,
+      remoteUrl: session.remoteUrl,
+      expiresAt: session.expiresAt,
+      pairedTabId: tabId
+    });
+    connectSocket(nextPairing);
+    return { ok: true, state: pairingState };
+  } catch (error) {
+    await cleanup(false);
+    const message = error instanceof SyntaxError ? "ChromeRemote relay returned an invalid session response." : "ChromeRemote could not reach the relay server.";
+    const errorCode = error instanceof SyntaxError ? "MALFORMED_SESSION_RESPONSE" : "REMOTE_SERVER_UNREACHABLE";
+    setPairingState({ status: "not-paired", errorCode, error: message });
+    return pairingError(errorCode, message);
+  }
+}
+
+chrome.runtime.onMessage.addListener((message: PairingRequest, _sender, sendResponse: (response: PairingResponse) => void) => {
+  if (!isPairingRequest(message)) {
+    sendResponse(pairingError("UNSUPPORTED_REMOTE_REQUEST", "Unsupported ChromeRemote pairing request."));
+    return false;
+  }
+
+  if (message.type === "REMOTE_PING") {
+    sendResponse({ ok: true, service: "background" });
+    return false;
+  }
+
+  if (message.type === "REMOTE_GET_STATUS") {
+    sendResponse({ ok: true, state: pairingState });
+    return false;
+  }
+
+  if (message.type === "REMOTE_CONNECT_PHONE") {
+    void startPairing(message.tabId, message.tabUrl).then(sendResponse);
+    return true;
+  }
+
+  if (message.type === "REMOTE_DISCONNECT") {
+    void cleanup(true).then(() => sendResponse({ ok: true, state: pairingState }));
+    return true;
+  }
+
+  sendResponse(pairingError("UNSUPPORTED_REMOTE_REQUEST", "Unsupported ChromeRemote pairing request."));
+  return false;
+});
+
+void loadPairing().then((pairing) => {
+  if (!pairing) {
+    return;
+  }
+
+  storedPairing = pairing;
+  setPairingState({
+    status: "temporarily-disconnected",
+    sessionId: pairing.sessionId,
+    remoteUrl: pairing.remoteUrl,
+    expiresAt: pairing.expiresAt,
+    pairedTabId: pairing.pairedTabId
+  });
+  connectSocket(pairing);
+});

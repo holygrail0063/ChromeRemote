@@ -1,0 +1,8 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".."
+  },
+  "include": ["src", "../src/shared/messages.ts", "../src/shared/player-state.ts", "../src/shared/remote-protocol.ts"]
+}

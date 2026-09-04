@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": ".tmp/test-build",
+    "rootDir": ".",
+    "types": ["node"]
+  },
+  "include": [
+    "src/shared/messages.ts",
+    "src/shared/netflix-url.ts",
+    "src/shared/pairing.ts",
+    "src/shared/player-state.ts",
+    "src/shared/remote-protocol.ts",
+    "src/shared/seek-utils.ts",
+    "server/src/**/*.ts",
+    "tests/**/*.ts"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "..",
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "../src/shared/messages.ts", "../src/shared/player-state.ts", "../src/shared/remote-protocol.ts"]
+}

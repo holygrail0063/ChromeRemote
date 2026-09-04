@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.tmp/
+remote/dist/
+server/dist/
+
+.env
+.env.*
+!.env.example
+
+*.log
+coverage/
+.DS_Store
+Thumbs.db
+
+.vscode/
+.idea/
