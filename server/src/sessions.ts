@@ -132,7 +132,7 @@ export function authenticate(sessionId: string, role: RemoteRole, token: string,
   }
 
   if (role === "controller" && session.controller && session.controller.id !== connection.id) {
-    return { ok: false, errorCode: "CONTROLLER_ALREADY_CONNECTED", message: "A phone is already connected to this session." };
+    session.controller.close();
   }
 
   if (role === "player") {
