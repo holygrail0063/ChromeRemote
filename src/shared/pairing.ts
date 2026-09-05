@@ -61,6 +61,7 @@ export type PairingPayloadResult =
 
 const phoneAccessConfigurationError = "ChromeRemote remote server is not configured for phone access.";
 const pairingPayloadPrefix = "CR1";
+const defaultPairingPageOrigin = "https://chromeremote-production.up.railway.app";
 const safePairingFieldPattern = /^[A-Za-z0-9_-]+$/;
 const minPairingFieldLength = 8;
 const maxPairingFieldLength = 128;
@@ -71,6 +72,33 @@ function isLocalPhoneHost(hostname: string): boolean {
 
 function isSafePairingField(value: string): boolean {
   return value.length >= minPairingFieldLength && value.length <= maxPairingFieldLength && safePairingFieldPattern.test(value);
+}
+
+function rawPairingPayload(sessionId: string, controllerToken: string): string {
+  return `${pairingPayloadPrefix}:${sessionId}:${controllerToken}`;
+}
+
+function extractPairingPayload(rawPayload: string): string {
+  const trimmed = rawPayload.trim();
+  if (trimmed.startsWith(`${pairingPayloadPrefix}:`)) {
+    return trimmed;
+  }
+
+  try {
+    const url = new URL(trimmed);
+    if (
+      (url.protocol === "https:" || url.protocol === "http:") &&
+      url.pathname === "/remote_session" &&
+      url.search.length === 0 &&
+      url.hash.length > 1
+    ) {
+      return decodeURIComponent(url.hash.slice(1));
+    }
+  } catch {
+    // The decoder below will reject non-URL, non-CR1 input.
+  }
+
+  return trimmed;
 }
 
 export function isValidRemoteOrigin(origin: string): boolean {
@@ -122,16 +150,23 @@ export function validateControllerUrl(remoteUrl: string, production: boolean): C
   return { ok: true, url };
 }
 
-export function encodePairingPayload(sessionId: string, controllerToken: string): string {
+export function encodePairingPayload(
+  sessionId: string,
+  controllerToken: string,
+  pairingPageOrigin = defaultPairingPageOrigin
+): string {
   if (!isSafePairingField(sessionId) || !isSafePairingField(controllerToken)) {
     throw new Error("Invalid ChromeRemote pairing payload fields.");
   }
 
-  return `${pairingPayloadPrefix}:${sessionId}:${controllerToken}`;
+  const origin = new URL(pairingPageOrigin).origin;
+  const pairingUrl = new URL("/remote_session", origin);
+  pairingUrl.hash = rawPairingPayload(sessionId, controllerToken);
+  return pairingUrl.toString();
 }
 
 export function decodePairingPayload(rawPayload: string): PairingPayloadResult {
-  const fields = rawPayload.trim().split(":");
+  const fields = extractPairingPayload(rawPayload).split(":");
   if (fields.length !== 3 || fields[0] !== pairingPayloadPrefix) {
     return { ok: false, error: "That isn't a ChromeRemote pairing code." };
   }
