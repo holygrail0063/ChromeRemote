@@ -1,5 +1,7 @@
+const DEFAULT_PRODUCTION_HTTP_ORIGIN = "https://chromeremote-production.up.railway.app";
+
 export const REMOTE_HTTP_ORIGIN =
-  import.meta.env.VITE_REMOTE_HTTP_ORIGIN;
+  import.meta.env.VITE_REMOTE_HTTP_ORIGIN ?? DEFAULT_PRODUCTION_HTTP_ORIGIN;
 
 export const REMOTE_WS_ORIGIN =
   import.meta.env.VITE_REMOTE_WS_ORIGIN ??
