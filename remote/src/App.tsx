@@ -22,17 +22,6 @@ type ControllerSession = {
 
 type ScannerStatus = "idle" | "starting" | "scanning" | "error";
 
-type BarcodeDetectorConstructor = new (options?: { formats?: string[] }) => {
-  detect(image: HTMLVideoElement): Promise<Array<{ rawValue?: string }>>;
-};
-
-type WindowWithBarcodeDetector = Window &
-  typeof globalThis & {
-    BarcodeDetector?: BarcodeDetectorConstructor & {
-      getSupportedFormats?: () => Promise<string[]>;
-    };
-  };
-
 type ScannerControls = {
   stop(): void;
 };
@@ -49,9 +38,24 @@ function formatTime(seconds: number): string {
 }
 
 function sessionFromUrl(): ControllerSession | null {
-  const match = window.location.pathname.match(/\/r\/([^/]+)/);
-  const token = window.location.hash.slice(1);
-  return match && token ? { sessionId: decodeURIComponent(match[1]), token, source: "url" } : null;
+  const legacyMatch = window.location.pathname.match(/\/r\/([^/]+)/);
+  const fragment = window.location.hash.slice(1);
+  if (legacyMatch && fragment) {
+    return { sessionId: decodeURIComponent(legacyMatch[1]), token: fragment, source: "url" };
+  }
+
+  if (window.location.pathname === "/remote_session" && fragment) {
+    const decoded = decodePairingPayload(fragment);
+    if (decoded.ok) {
+      return {
+        sessionId: decoded.payload.sessionId,
+        token: decoded.payload.controllerToken,
+        source: "url"
+      };
+    }
+  }
+
+  return null;
 }
 
 export function App() {
@@ -228,24 +232,20 @@ export function App() {
 
 function PairingScanner({ onPair }: { onPair: (payload: { sessionId: string; controllerToken: string }) => void }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
   const controlsRef = useRef<ScannerControls | null>(null);
-  const animationFrameRef = useRef<number | null>(null);
   const pairedRef = useRef(false);
   const [status, setStatus] = useState<ScannerStatus>("idle");
   const [message, setMessage] = useState("Scan the QR code shown in your ChromeRemote extension.");
 
   const cleanupCamera = () => {
-    if (animationFrameRef.current !== null) {
-      window.cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
-    }
     controlsRef.current?.stop();
     controlsRef.current = null;
-    if (streamRef.current) {
-      stopMediaStreamTracks(streamRef.current);
-      streamRef.current = null;
+
+    const stream = videoRef.current?.srcObject;
+    if (stream && "getTracks" in stream) {
+      stopMediaStreamTracks(stream as MediaStream);
     }
+
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
@@ -269,52 +269,6 @@ function PairingScanner({ onPair }: { onPair: (payload: { sessionId: string; con
     return true;
   };
 
-  const scanWithNativeDetector = async (video: HTMLVideoElement) => {
-    const barcodeWindow = window as WindowWithBarcodeDetector;
-    if (!barcodeWindow.BarcodeDetector) {
-      return false;
-    }
-
-    const supportedFormats = barcodeWindow.BarcodeDetector.getSupportedFormats ? await barcodeWindow.BarcodeDetector.getSupportedFormats() : ["qr_code"];
-    if (!supportedFormats.includes("qr_code")) {
-      return false;
-    }
-
-    const detector = new barcodeWindow.BarcodeDetector({ formats: ["qr_code"] });
-    const scanFrame = () => {
-      void detector
-        .detect(video)
-        .then((codes) => {
-          if (pairedRef.current) {
-            return;
-          }
-
-          const value = codes.find((code) => typeof code.rawValue === "string")?.rawValue;
-          if (value && handlePayload(value)) {
-            return;
-          }
-
-          animationFrameRef.current = window.requestAnimationFrame(scanFrame);
-        })
-        .catch(() => {
-          animationFrameRef.current = window.requestAnimationFrame(scanFrame);
-        });
-    };
-
-    scanFrame();
-    return true;
-  };
-
-  const scanWithZxing = async (video: HTMLVideoElement) => {
-    const { BrowserQRCodeReader } = await import("@zxing/browser");
-    const reader = new BrowserQRCodeReader();
-    controlsRef.current = await reader.decodeFromVideoElement(video, (result) => {
-      if (result && !pairedRef.current) {
-        handlePayload(result.getText());
-      }
-    });
-  };
-
   const openCamera = async () => {
     setStatus("starting");
     setMessage("Opening camera...");
@@ -334,31 +288,39 @@ function PairingScanner({ onPair }: { onPair: (payload: { sessionId: string; con
 
     try {
       cleanupCamera();
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
-      streamRef.current = stream;
-
       const video = videoRef.current;
       if (!video) {
-        cleanupCamera();
         setStatus("error");
         setMessage("Camera preview is unavailable.");
         return;
       }
 
-      video.srcObject = stream;
-      await video.play();
+      const { BrowserQRCodeReader } = await import("@zxing/browser");
+      const reader = new BrowserQRCodeReader();
       setStatus("scanning");
       setMessage("Point your camera at the ChromeRemote QR code.");
 
-      const nativeScanning = await scanWithNativeDetector(video);
-      if (!nativeScanning) {
-        await scanWithZxing(video);
-      }
+      controlsRef.current = await reader.decodeFromConstraints(
+        {
+          audio: false,
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
+        },
+        video,
+        (result) => {
+          if (result && !pairedRef.current) {
+            handlePayload(result.getText());
+          }
+        }
+      );
     } catch (error) {
       cleanupCamera();
       setStatus("error");
       const name = error instanceof DOMException ? error.name : "";
-      setMessage(name === "NotAllowedError" ? "Camera permission was denied." : "Camera is unavailable.");
+      setMessage(name === "NotAllowedError" ? "Camera permission was denied." : "Camera is unavailable. Tap Try Again.");
     }
   };
 
@@ -375,7 +337,7 @@ function PairingScanner({ onPair }: { onPair: (payload: { sessionId: string; con
         <h2>Scan ChromeRemote QR</h2>
         <p>{message}</p>
         <div className="camera-frame">
-          <video ref={videoRef} muted playsInline aria-label="Camera preview" />
+          <video ref={videoRef} muted playsInline autoPlay aria-label="Camera preview" />
           {status !== "scanning" ? <span>Camera Preview</span> : null}
         </div>
         {status === "idle" || status === "error" ? (
