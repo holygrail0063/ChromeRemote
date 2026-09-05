@@ -58,6 +58,15 @@ function sessionFromUrl(): ControllerSession | null {
   return null;
 }
 
+function persistControllerSession(sessionId: string, controllerToken: string): void {
+  const fragment = `CR1:${sessionId}:${controllerToken}`;
+  window.history.replaceState(null, "", `/remote_session#${fragment}`);
+}
+
+function clearControllerSession(): void {
+  window.history.replaceState(null, "", "/remote_session");
+}
+
 export function App() {
   const [snapshot, setSnapshot] = useState<RemoteSnapshot>(emptySnapshot);
   const [localSeek, setLocalSeek] = useState<number | null>(null);
@@ -88,6 +97,7 @@ export function App() {
     return (
       <PairingScanner
         onPair={(payload) => {
+          persistControllerSession(payload.sessionId, payload.controllerToken);
           setSnapshot({ status: "connecting", state: null, message: "Connecting..." });
           setScannedSession({ sessionId: payload.sessionId, token: payload.controllerToken, source: "scan" });
         }}
@@ -96,7 +106,15 @@ export function App() {
   }
 
   if (snapshot.status === "auth-failed" && session.source === "scan") {
-    return <ScanAgain message="This ChromeRemote pairing session has expired. Create a new QR from the Chrome extension." onScanAgain={() => setScannedSession(null)} />;
+    return (
+      <ScanAgain
+        message="This ChromeRemote pairing session has expired. Create a new QR from the Chrome extension."
+        onScanAgain={() => {
+          clearControllerSession();
+          setScannedSession(null);
+        }}
+      />
+    );
   }
 
   const runCommand = (command: PlayerCommand) => {
