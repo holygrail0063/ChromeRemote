@@ -5,6 +5,7 @@ import {
   isCreateRemoteSessionResponse,
   isPairingRequest,
   isValidRemoteOrigin,
+  validateControllerUrl,
   type PairingErrorCode,
   type PairingRequest,
   type PairingResponse,
@@ -320,14 +321,21 @@ async function startPairing(tabId: number, tabUrl: string): Promise<PairingRespo
   try {
     const response = await fetch(`${REMOTE_HTTP_ORIGIN}/api/sessions`, { method: "POST" });
     if (!response.ok) {
+      const serverError = await readServerError(response);
       await cleanup(false);
-      return pairingError("SESSION_CREATE_FAILED", "ChromeRemote could not create a phone session.");
+      return pairingError(serverError.errorCode, serverError.error);
     }
 
     const session = await response.json();
     if (!isCreateRemoteSessionResponse(session)) {
       await cleanup(false);
       return pairingError("SESSION_RESPONSE_INVALID", "ChromeRemote relay returned an invalid session response.");
+    }
+
+    const controllerUrlValidation = validateControllerUrl(session.remoteUrl, import.meta.env.PROD);
+    if (!controllerUrlValidation.ok) {
+      await cleanup(false);
+      return pairingError(controllerUrlValidation.errorCode, controllerUrlValidation.error);
     }
 
     const nextPairing: StoredPairing = {
@@ -355,6 +363,19 @@ async function startPairing(tabId: number, tabUrl: string): Promise<PairingRespo
     setPairingState({ status: "not-paired", errorCode, error: message });
     return pairingError(errorCode, message);
   }
+}
+
+async function readServerError(response: Response): Promise<{ errorCode: PairingErrorCode; error: string }> {
+  try {
+    const body = (await response.json()) as { errorCode?: unknown; message?: unknown };
+    if (body.errorCode === "REMOTE_SERVER_NOT_CONFIGURED" && typeof body.message === "string") {
+      return { errorCode: "REMOTE_SERVER_NOT_CONFIGURED", error: body.message };
+    }
+  } catch {
+    // Fall through to the generic session creation error below.
+  }
+
+  return { errorCode: "SESSION_CREATE_FAILED", error: "ChromeRemote could not create a phone session." };
 }
 
 chrome.runtime.onMessage.addListener((message: PairingRequest, _sender, sendResponse: (response: PairingResponse) => void) => {

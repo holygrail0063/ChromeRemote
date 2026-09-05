@@ -45,6 +45,16 @@ export type CreateRemoteSessionResponse = {
   expiresAt: string;
 };
 
+export type ControllerUrlValidationResult =
+  | { ok: true; url: URL }
+  | { ok: false; errorCode: "REMOTE_SERVER_NOT_CONFIGURED" | "SESSION_RESPONSE_INVALID"; error: string };
+
+const phoneAccessConfigurationError = "ChromeRemote remote server is not configured for phone access.";
+
+function isLocalPhoneHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === [127, 0, 0, 1].join(".") || hostname === [0, 0, 0, 0].join(".");
+}
+
 export function isValidRemoteOrigin(origin: string): boolean {
   try {
     const url = new URL(origin);
@@ -72,6 +82,26 @@ export function isCreateRemoteSessionResponse(value: unknown): value is CreateRe
     typeof candidate.expiresAt === "string" &&
     Number.isFinite(Date.parse(candidate.expiresAt))
   );
+}
+
+export function validateControllerUrl(remoteUrl: string, production: boolean): ControllerUrlValidationResult {
+  let url: URL;
+  try {
+    url = new URL(remoteUrl);
+  } catch {
+    return { ok: false, errorCode: "SESSION_RESPONSE_INVALID", error: "ChromeRemote relay returned an invalid session response." };
+  }
+
+  const sessionId = url.pathname.startsWith("/r/") ? url.pathname.slice("/r/".length) : "";
+  if (!url.pathname.startsWith("/r/") || sessionId.length === 0 || url.hash.length <= 1 || url.search.length > 0) {
+    return { ok: false, errorCode: "SESSION_RESPONSE_INVALID", error: "ChromeRemote relay returned an invalid session response." };
+  }
+
+  if (production && (url.protocol !== "https:" || isLocalPhoneHost(url.hostname))) {
+    return { ok: false, errorCode: "REMOTE_SERVER_NOT_CONFIGURED", error: phoneAccessConfigurationError };
+  }
+
+  return { ok: true, url };
 }
 
 export function isPairingRequest(value: unknown): value is PairingRequest {

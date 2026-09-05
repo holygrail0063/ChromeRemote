@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import QRCode from "qrcode";
 import { PLAYBACK_RATES, type PlaybackRate, type PlayerCommand, type PlayerResponse } from "../shared/messages";
 import { getNetflixPageContext } from "../shared/netflix-url";
-import { backgroundUnavailableResponse, type PairingResponse, type PairingState } from "../shared/pairing";
+import { backgroundUnavailableResponse, validateControllerUrl, type PairingResponse, type PairingState } from "../shared/pairing";
 import type { PlayerState } from "../shared/player-state";
 
 type ConnectionStatus = "checking" | "connected" | "player-loading" | "netflix-browsing" | "not-netflix" | "communication-error";
@@ -107,6 +108,8 @@ export function Popup() {
   const [pairing, setPairing] = useState<PairingState>(initialPairingState);
   const [busyCommand, setBusyCommand] = useState<PlayerCommand["type"] | null>(null);
   const [pairingError, setPairingError] = useState<string | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [qrError, setQrError] = useState<string | null>(null);
 
   const refresh = async () => {
     const tab = await getActiveTab();
@@ -191,6 +194,48 @@ export function Popup() {
     chrome.runtime.onMessage.addListener(listener);
     return () => chrome.runtime.onMessage.removeListener(listener);
   }, []);
+
+  useEffect(() => {
+    if (pairing.status !== "waiting" || !pairing.remoteUrl) {
+      setQrDataUrl(null);
+      setQrError(null);
+      return;
+    }
+
+    const validation = validateControllerUrl(pairing.remoteUrl, import.meta.env.PROD);
+    if (!validation.ok) {
+      setQrDataUrl(null);
+      setQrError(validation.error);
+      return;
+    }
+
+    let cancelled = false;
+    setQrDataUrl(null);
+    setQrError(null);
+    void QRCode.toDataURL(pairing.remoteUrl, {
+      errorCorrectionLevel: "M",
+      margin: 4,
+      width: 204,
+      color: {
+        dark: "#000000",
+        light: "#ffffff"
+      }
+    })
+      .then((dataUrl) => {
+        if (!cancelled) {
+          setQrDataUrl(dataUrl);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setQrError("ChromeRemote could not generate the phone pairing QR code.");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pairing.remoteUrl, pairing.status]);
 
   const runCommand = async (command: PlayerCommand) => {
     setBusyCommand(command.type);
@@ -393,16 +438,17 @@ export function Popup() {
         {pairing.status === "creating" ? <div className="phone-copy">Creating secure session...</div> : null}
         {pairing.status === "waiting" && pairing.remoteUrl ? (
           <>
-            <div className="qr-box" aria-label="QR pairing code">
-              {pairing.remoteUrl.slice(0, 121).split("").map((char, index) => (
-                <span key={`${char}-${index}`} className={char.charCodeAt(0) % 2 === index % 2 ? "qr-dark" : undefined} />
-              ))}
-            </div>
-            <div className="phone-copy">Scan with your phone</div>
-            <div className="phone-link">{pairing.remoteUrl}</div>
-            <div className="phone-status">
-              <span aria-hidden="true" /> Waiting for phone...
-            </div>
+            {qrError ? <div className="phone-error">{qrError}</div> : null}
+            {!qrError && qrDataUrl ? <img className="qr-code" src={qrDataUrl} width="204" height="204" alt="Phone pairing QR code" /> : null}
+            {!qrError && !qrDataUrl ? <div className="phone-copy">Preparing QR code...</div> : null}
+            {!qrError ? (
+              <>
+                <div className="phone-copy">Scan with your phone</div>
+                <div className="phone-status">
+                  <span aria-hidden="true" /> Waiting for phone...
+                </div>
+              </>
+            ) : null}
           </>
         ) : null}
         {pairing.status === "connected" ? (

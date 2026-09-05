@@ -34,6 +34,11 @@ const developmentPublicOrigin = "http://localhost:8787";
 
 const sessions = new Map<string, RemoteSession>();
 
+type CreateSessionOptions = {
+  allowLocalOrigins?: boolean;
+  requireHttps?: boolean;
+};
+
 function createSecret(): string {
   return randomBytes(32).toString("base64url");
 }
@@ -48,12 +53,36 @@ function secretsEqual(left: string, right: string): boolean {
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-export function createSession(now = Date.now(), publicOrigin = developmentPublicOrigin): SessionTokens {
+function isLocalPhoneOrigin(hostname: string): boolean {
+  return hostname === "localhost" || hostname === [127, 0, 0, 1].join(".") || hostname === [0, 0, 0, 0].join(".");
+}
+
+export function normalizePublicOrigin(publicOrigin: string, options: CreateSessionOptions = {}): string {
+  const url = new URL(publicOrigin);
+  const allowLocalOrigins = options.allowLocalOrigins ?? true;
+
+  if (!allowLocalOrigins && isLocalPhoneOrigin(url.hostname)) {
+    throw new Error("PUBLIC_ORIGIN must be reachable by phones in production.");
+  }
+
+  if (options.requireHttps && url.protocol !== "https:") {
+    throw new Error("PUBLIC_ORIGIN must use HTTPS in production.");
+  }
+
+  return url.origin;
+}
+
+export function createControllerUrl(sessionId: string, controllerToken: string, publicOrigin: string, options: CreateSessionOptions = {}): string {
+  const origin = normalizePublicOrigin(publicOrigin, options);
+  return `${origin}/r/${encodeURIComponent(sessionId)}#${controllerToken}`;
+}
+
+export function createSession(now = Date.now(), publicOrigin = developmentPublicOrigin, options: CreateSessionOptions = {}): SessionTokens {
   const sessionId = randomBytes(16).toString("base64url");
   const playerToken = createSecret();
   const controllerToken = createSecret();
   const expiresAtMs = now + sessionLifetimeMs;
-  const remoteUrl = `${publicOrigin.replace(/\/$/, "")}/r/${encodeURIComponent(sessionId)}#${controllerToken}`;
+  const remoteUrl = createControllerUrl(sessionId, controllerToken, publicOrigin, options);
 
   sessions.set(sessionId, {
     sessionId,

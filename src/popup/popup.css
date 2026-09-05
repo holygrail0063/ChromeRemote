@@ -277,15 +277,9 @@ input[type="range"] {
   font-weight: 800;
 }
 
-.phone-copy,
-.phone-link {
+.phone-copy {
   color: #c8c8c8;
   font-size: 13px;
-}
-
-.phone-link {
-  overflow-wrap: anywhere;
-  color: #8ab4ff;
 }
 
 .phone-status {
@@ -308,24 +302,13 @@ input[type="range"] {
   background: #37d67a;
 }
 
-.qr-box {
-  display: grid;
-  grid-template-columns: repeat(11, 1fr);
-  gap: 2px;
-  width: 132px;
-  height: 132px;
-  padding: 8px;
+.qr-code {
+  display: block;
+  width: 204px;
+  height: 204px;
   border-radius: 8px;
   background: #fff;
-}
-
-.qr-box span {
-  border-radius: 1px;
-  background: #fff;
-}
-
-.qr-box .qr-dark {
-  background: #111;
+  image-rendering: pixelated;
 }
 
 .phone-error {

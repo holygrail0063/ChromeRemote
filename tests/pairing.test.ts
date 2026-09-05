@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { backgroundUnavailableResponse, isCreateRemoteSessionResponse, isPairingRequest, isValidRemoteOrigin } from "../src/shared/pairing.js";
+import {
+  backgroundUnavailableResponse,
+  isCreateRemoteSessionResponse,
+  isPairingRequest,
+  isValidRemoteOrigin,
+  validateControllerUrl
+} from "../src/shared/pairing.js";
 
 test("background handler diagnostic REMOTE_PING request is recognized", () => {
   assert.equal(isPairingRequest({ type: "REMOTE_PING" }), true);
@@ -49,4 +55,16 @@ test("popup rejected runtime messaging maps to background unavailable", () => {
   assert.equal(response.ok, false);
   assert.equal(response.ok ? "" : response.errorCode, "BACKGROUND_UNAVAILABLE");
   assert.match(response.ok ? "" : response.error, /background service is unavailable/i);
+});
+
+test("production controller URL validation rejects local and malformed phone links", () => {
+  assert.equal(validateControllerUrl("https://chromeremote-production.up.railway.app/r/session#controller", true).ok, true);
+  assert.equal(validateControllerUrl("http://localhost:8787/r/session#controller", true).ok, false);
+  assert.equal(validateControllerUrl("http://127.0.0.1:8787/r/session#controller", true).ok, false);
+  assert.equal(validateControllerUrl("https://chromeremote-production.up.railway.app/r/session?token=controller", true).ok, false);
+  assert.equal(validateControllerUrl("https://chromeremote-production.up.railway.app/browse#controller", true).ok, false);
+});
+
+test("development controller URL validation permits localhost phone links", () => {
+  assert.equal(validateControllerUrl("http://localhost:8787/r/session#controller", false).ok, true);
 });

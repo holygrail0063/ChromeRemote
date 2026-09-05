@@ -89,7 +89,7 @@ function sendConfigError(request: import("node:http").IncomingMessage, response:
   sendJson(request, response, 500, {
     ok: false,
     errorCode: "REMOTE_SERVER_NOT_CONFIGURED",
-    message: "ChromeRemote relay server is not configured."
+    message: "ChromeRemote remote server is not configured for phone access."
   });
 }
 
@@ -168,7 +168,16 @@ async function handleRequest(request: import("node:http").IncomingMessage, respo
 
   if (request.method === "POST" && request.url === "/api/sessions") {
     try {
-      sendJson(request, response, 201, createSession(Date.now(), getRequestPublicOrigin(request)));
+      const productionRuntime = isProductionRuntime();
+      sendJson(
+        request,
+        response,
+        201,
+        createSession(Date.now(), getRequestPublicOrigin(request), {
+          allowLocalOrigins: !productionRuntime,
+          requireHttps: productionRuntime
+        })
+      );
     } catch {
       sendConfigError(request, response);
     }

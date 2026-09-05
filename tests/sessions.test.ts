@@ -3,10 +3,12 @@ import test from "node:test";
 import {
   authenticate,
   clearSessionsForTests,
+  createControllerUrl,
   createSession,
   forwardFromController,
   getSession,
   invalidateSession,
+  normalizePublicOrigin,
   type SessionConnection
 } from "../server/src/sessions.js";
 
@@ -103,4 +105,23 @@ test("session remote URL keeps controller token in fragment", () => {
   const url = new URL(tokens.remoteUrl);
   assert.equal(url.search, "");
   assert.equal(url.hash.length > 1, true);
+});
+
+test("controller URL generation normalizes trailing public origin slash", () => {
+  assert.equal(
+    createControllerUrl("session-id", "controller-token", "https://chromeremote-production.up.railway.app/"),
+    "https://chromeremote-production.up.railway.app/r/session-id#controller-token"
+  );
+});
+
+test("production public origin rejects localhost and loopback origins", () => {
+  assert.throws(() => normalizePublicOrigin("http://localhost:8787", { allowLocalOrigins: false, requireHttps: true }), /phone/i);
+  assert.throws(() => normalizePublicOrigin("http://127.0.0.1:8787", { allowLocalOrigins: false, requireHttps: true }), /phone/i);
+});
+
+test("production public origin requires HTTPS", () => {
+  assert.throws(
+    () => normalizePublicOrigin("http://chromeremote-production.up.railway.app", { allowLocalOrigins: false, requireHttps: true }),
+    /HTTPS/i
+  );
 });
