@@ -37,6 +37,51 @@ jobs:
       - name: Build production extension
         run: npm run build:extension:production
 
+      - name: Add installation instructions
+        run: |
+          cat > dist/INSTALL.txt <<'EOF'
+          ChromeRemote v1.3.0 - Installation & Use
+          =========================================
+
+          INSTALL ON YOUR COMPUTER
+          1. Extract ChromeRemote-Extension.zip to a permanent folder.
+          2. Open Google Chrome.
+          3. Go to: chrome://extensions
+          4. Turn ON Developer mode (top-right).
+          5. Click "Load unpacked".
+          6. Select the extracted ChromeRemote folder.
+          7. Optional: pin ChromeRemote from Chrome's Extensions menu.
+
+          PAIR YOUR PHONE
+          1. Open Netflix in Chrome and start playing a movie or episode.
+          2. Click the ChromeRemote extension icon.
+          3. Click "Pair Phone".
+          4. A unique QR code will appear.
+          5. Scan the QR with your phone camera, or open:
+             https://chromeremote-production.up.railway.app/remote_session
+             and use the ChromeRemote scanner.
+          6. The phone remote will connect to that specific Netflix session.
+
+          PHONE CONTROLS
+          - Play / Pause
+          - Rewind 10 seconds / Forward 10 seconds
+          - Seek slider
+          - Next Episode
+          - Fullscreen / Exit Fullscreen
+          - Mute / Unmute
+          - Volume controls
+          - Playback speeds: 0.5x, 0.75x, 1x, 1.25x, 1.5x
+
+          NOTES
+          - Keep the extracted extension folder on your computer after installation.
+          - ChromeRemote currently uses Chrome's Developer mode / Load unpacked flow.
+          - No Node.js, npm, Git, or Railway account is required for normal use.
+          - The hosted ChromeRemote relay/mobile service is used automatically.
+
+          Project:
+          https://github.com/holygrail0063/ChromeRemote
+          EOF
+
       - name: Create unpacked extension ZIP
         run: |
           rm -f ChromeRemote-Extension.zip
@@ -57,5 +102,5 @@ jobs:
             gh release create "$TAG" ChromeRemote-Extension.zip \
               --target "$GITHUB_SHA" \
               --title "$TITLE" \
-              --notes "Ready-to-load ChromeRemote extension. Download ChromeRemote-Extension.zip, extract it, then open chrome://extensions, enable Developer mode, choose Load unpacked, and select the extracted folder."
+              --notes "Ready-to-load ChromeRemote extension. Download ChromeRemote-Extension.zip, extract it, open INSTALL.txt, then follow the instructions to load it in Chrome and pair your phone."
           fi
