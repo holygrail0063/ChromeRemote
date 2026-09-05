@@ -140,23 +140,6 @@ export function App() {
         </section>
       ) : null}
 
-      <section className="controls" aria-label="Playback controls">
-        <button type="button" disabled={disabled} onClick={() => runCommand({ type: "SEEK_RELATIVE", seconds: -10 })}>
-          -10
-        </button>
-        <button
-          type="button"
-          className="primary-control"
-          disabled={disabled}
-          onClick={() => runCommand({ type: player?.playing ? "PAUSE" : "PLAY" })}
-        >
-          {player?.playing ? "Pause" : "Play"}
-        </button>
-        <button type="button" disabled={disabled} onClick={() => runCommand({ type: "SEEK_RELATIVE", seconds: 10 })}>
-          +10
-        </button>
-      </section>
-
       <section className="media-actions" aria-label="Netflix media actions">
         <button type="button" disabled={disabled} onClick={() => runCommand({ type: "NEXT_EPISODE" })}>
           Next Episode
@@ -248,6 +231,23 @@ export function App() {
           onPointerUp={(event) => commitSeek(Number(event.currentTarget.value))}
           onKeyUp={(event) => commitSeek(Number(event.currentTarget.value))}
         />
+      </section>
+
+      <section className="controls" aria-label="Playback controls">
+        <button type="button" disabled={disabled} onClick={() => runCommand({ type: "SEEK_RELATIVE", seconds: -10 })}>
+          -10
+        </button>
+        <button
+          type="button"
+          className="primary-control"
+          disabled={disabled}
+          onClick={() => runCommand({ type: player?.playing ? "PAUSE" : "PLAY" })}
+        >
+          {player?.playing ? "Pause" : "Play"}
+        </button>
+        <button type="button" disabled={disabled} onClick={() => runCommand({ type: "SEEK_RELATIVE", seconds: 10 })}>
+          +10
+        </button>
       </section>
     </main>
   );
