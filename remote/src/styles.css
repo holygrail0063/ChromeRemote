@@ -247,8 +247,10 @@ input[type="range"] {
 
 .state-grid > div {
   display: grid;
+  justify-items: center;
   gap: 6px;
   min-width: 0;
+  text-align: center;
 }
 
 .state-grid span {
