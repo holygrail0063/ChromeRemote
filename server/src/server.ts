@@ -119,7 +119,7 @@ async function serveStatic(request: import("node:http").IncomingMessage, respons
 
   const requestUrl = new URL(request.url ?? "/", publicOrigin);
   const pathname = decodeURIComponent(requestUrl.pathname);
-  const routePath = pathname === "/" || pathname.startsWith("/r/") ? "/index.html" : pathname;
+  const routePath = pathname === "/" || pathname === "/remote_session" || pathname.startsWith("/r/") ? "/index.html" : pathname;
   const filePath = normalize(join(staticRoot, routePath));
 
   if (!filePath.startsWith(staticRoot)) {

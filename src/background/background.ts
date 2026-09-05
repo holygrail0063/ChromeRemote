@@ -2,6 +2,7 @@ import { REMOTE_HTTP_ORIGIN, REMOTE_WS_ORIGIN } from "../shared/remote-config";
 import { getNetflixPageContext } from "../shared/netflix-url";
 import type { PlayerCommand, PlayerResponse } from "../shared/messages";
 import {
+  encodePairingPayload,
   isCreateRemoteSessionResponse,
   isPairingRequest,
   isValidRemoteOrigin,
@@ -17,6 +18,7 @@ type StoredPairing = {
   sessionId: string;
   playerToken: string;
   remoteUrl: string;
+  pairingPayload: string;
   expiresAt: string;
   pairedTabId: number;
 };
@@ -71,6 +73,11 @@ async function loadPairing(): Promise<StoredPairing | null> {
     return null;
   }
 
+  if (!candidate.pairingPayload) {
+    await savePairing(null);
+    return null;
+  }
+
   return candidate;
 }
 
@@ -99,6 +106,7 @@ function scheduleReconnect(): void {
     status: "temporarily-disconnected",
     sessionId: storedPairing.sessionId,
     remoteUrl: storedPairing.remoteUrl,
+    pairingPayload: storedPairing.pairingPayload,
     expiresAt: storedPairing.expiresAt,
     pairedTabId: storedPairing.pairedTabId
   });
@@ -187,6 +195,7 @@ function handleServerMessage(message: RemoteServerMessage): void {
       status: "waiting",
       sessionId: storedPairing.sessionId,
       remoteUrl: storedPairing.remoteUrl,
+      pairingPayload: storedPairing.pairingPayload,
       expiresAt: storedPairing.expiresAt,
       pairedTabId: storedPairing.pairedTabId
     });
@@ -338,10 +347,12 @@ async function startPairing(tabId: number, tabUrl: string): Promise<PairingRespo
       return pairingError(controllerUrlValidation.errorCode, controllerUrlValidation.error);
     }
 
+    const pairingPayload = encodePairingPayload(session.sessionId, session.controllerToken);
     const nextPairing: StoredPairing = {
       sessionId: session.sessionId,
       playerToken: session.playerToken,
       remoteUrl: session.remoteUrl,
+      pairingPayload,
       expiresAt: session.expiresAt,
       pairedTabId: tabId
     };
@@ -351,6 +362,7 @@ async function startPairing(tabId: number, tabUrl: string): Promise<PairingRespo
       status: "waiting",
       sessionId: session.sessionId,
       remoteUrl: session.remoteUrl,
+      pairingPayload,
       expiresAt: session.expiresAt,
       pairedTabId: tabId
     });
@@ -418,6 +430,7 @@ void loadPairing().then((pairing) => {
     status: "temporarily-disconnected",
     sessionId: pairing.sessionId,
     remoteUrl: pairing.remoteUrl,
+    pairingPayload: pairing.pairingPayload,
     expiresAt: pairing.expiresAt,
     pairedTabId: pairing.pairedTabId
   });

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PLAYBACK_RATES, type PlaybackRate, type PlayerCommand } from "../../src/shared/messages";
+import { decodePairingPayload, stopMediaStreamTracks } from "../../src/shared/pairing";
 import type { PlayerState } from "../../src/shared/player-state";
 import { RemoteSocket, type RemoteSnapshot } from "./socket";
 
@@ -11,6 +12,30 @@ const emptySnapshot: RemoteSnapshot = {
 
 const clampVolume = (value: number) => Math.min(Math.max(value, 0), 1);
 const formatPlaybackRate = (rate: number) => `${Number.isInteger(rate) ? rate.toFixed(0) : rate}x`;
+const invalidPairingCodeMessage = "That isn't a ChromeRemote pairing code.";
+
+type ControllerSession = {
+  sessionId: string;
+  token: string;
+  source: "url" | "scan";
+};
+
+type ScannerStatus = "idle" | "starting" | "scanning" | "error";
+
+type BarcodeDetectorConstructor = new (options?: { formats?: string[] }) => {
+  detect(image: HTMLVideoElement): Promise<Array<{ rawValue?: string }>>;
+};
+
+type WindowWithBarcodeDetector = Window &
+  typeof globalThis & {
+    BarcodeDetector?: BarcodeDetectorConstructor & {
+      getSupportedFormats?: () => Promise<string[]>;
+    };
+  };
+
+type ScannerControls = {
+  stop(): void;
+};
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) {
@@ -23,17 +48,19 @@ function formatTime(seconds: number): string {
   return `${minutes}:${remainder.toString().padStart(2, "0")}`;
 }
 
-function sessionFromUrl(): { sessionId: string; token: string } | null {
+function sessionFromUrl(): ControllerSession | null {
   const match = window.location.pathname.match(/\/r\/([^/]+)/);
   const token = window.location.hash.slice(1);
-  return match && token ? { sessionId: decodeURIComponent(match[1]), token } : null;
+  return match && token ? { sessionId: decodeURIComponent(match[1]), token, source: "url" } : null;
 }
 
 export function App() {
   const [snapshot, setSnapshot] = useState<RemoteSnapshot>(emptySnapshot);
   const [localSeek, setLocalSeek] = useState<number | null>(null);
+  const [scannedSession, setScannedSession] = useState<ControllerSession | null>(null);
   const socketRef = useRef<RemoteSocket | null>(null);
-  const session = useMemo(sessionFromUrl, []);
+  const urlSession = useMemo(sessionFromUrl, []);
+  const session = scannedSession ?? urlSession;
   const player = snapshot.state;
   const disabled = snapshot.status !== "connected" || !player?.detected;
   const progress = localSeek ?? player?.currentTime ?? 0;
@@ -42,7 +69,7 @@ export function App() {
 
   useEffect(() => {
     if (!session) {
-      setSnapshot({ status: "auth-failed", state: null, message: "Unable to authenticate this remote." });
+      setSnapshot(emptySnapshot);
       return;
     }
 
@@ -51,6 +78,21 @@ export function App() {
     remote.connect();
     return () => remote.disconnect();
   }, [session]);
+
+  if (!session) {
+    return (
+      <PairingScanner
+        onPair={(payload) => {
+          setSnapshot({ status: "connecting", state: null, message: "Connecting..." });
+          setScannedSession({ sessionId: payload.sessionId, token: payload.controllerToken, source: "scan" });
+        }}
+      />
+    );
+  }
+
+  if (snapshot.status === "auth-failed" && session.source === "scan") {
+    return <ScanAgain message="This ChromeRemote pairing session has expired. Create a new QR from the Chrome extension." onScanAgain={() => setScannedSession(null)} />;
+  }
 
   const runCommand = (command: PlayerCommand) => {
     void socketRef.current?.command(command);
@@ -180,6 +222,188 @@ export function App() {
       <div className="chrome-status">
         <span aria-hidden="true" /> {snapshot.message}
       </div>
+    </main>
+  );
+}
+
+function PairingScanner({ onPair }: { onPair: (payload: { sessionId: string; controllerToken: string }) => void }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const controlsRef = useRef<ScannerControls | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const pairedRef = useRef(false);
+  const [status, setStatus] = useState<ScannerStatus>("idle");
+  const [message, setMessage] = useState("Scan the QR code shown in your ChromeRemote extension.");
+
+  const cleanupCamera = () => {
+    if (animationFrameRef.current !== null) {
+      window.cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    controlsRef.current?.stop();
+    controlsRef.current = null;
+    if (streamRef.current) {
+      stopMediaStreamTracks(streamRef.current);
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  };
+
+  useEffect(() => cleanupCamera, []);
+
+  const handlePayload = (rawPayload: string) => {
+    const decoded = decodePairingPayload(rawPayload);
+    if (!decoded.ok) {
+      setStatus("scanning");
+      setMessage(invalidPairingCodeMessage);
+      return false;
+    }
+
+    pairedRef.current = true;
+    cleanupCamera();
+    setStatus("idle");
+    setMessage("Connecting...");
+    onPair(decoded.payload);
+    return true;
+  };
+
+  const scanWithNativeDetector = async (video: HTMLVideoElement) => {
+    const barcodeWindow = window as WindowWithBarcodeDetector;
+    if (!barcodeWindow.BarcodeDetector) {
+      return false;
+    }
+
+    const supportedFormats = barcodeWindow.BarcodeDetector.getSupportedFormats ? await barcodeWindow.BarcodeDetector.getSupportedFormats() : ["qr_code"];
+    if (!supportedFormats.includes("qr_code")) {
+      return false;
+    }
+
+    const detector = new barcodeWindow.BarcodeDetector({ formats: ["qr_code"] });
+    const scanFrame = () => {
+      void detector
+        .detect(video)
+        .then((codes) => {
+          if (pairedRef.current) {
+            return;
+          }
+
+          const value = codes.find((code) => typeof code.rawValue === "string")?.rawValue;
+          if (value && handlePayload(value)) {
+            return;
+          }
+
+          animationFrameRef.current = window.requestAnimationFrame(scanFrame);
+        })
+        .catch(() => {
+          animationFrameRef.current = window.requestAnimationFrame(scanFrame);
+        });
+    };
+
+    scanFrame();
+    return true;
+  };
+
+  const scanWithZxing = async (video: HTMLVideoElement) => {
+    const { BrowserQRCodeReader } = await import("@zxing/browser");
+    const reader = new BrowserQRCodeReader();
+    controlsRef.current = await reader.decodeFromVideoElement(video, (result) => {
+      if (result && !pairedRef.current) {
+        handlePayload(result.getText());
+      }
+    });
+  };
+
+  const openCamera = async () => {
+    setStatus("starting");
+    setMessage("Opening camera...");
+    pairedRef.current = false;
+
+    if (!window.isSecureContext) {
+      setStatus("error");
+      setMessage("Camera access requires HTTPS.");
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setStatus("error");
+      setMessage("No camera is available in this browser.");
+      return;
+    }
+
+    try {
+      cleanupCamera();
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+      streamRef.current = stream;
+
+      const video = videoRef.current;
+      if (!video) {
+        cleanupCamera();
+        setStatus("error");
+        setMessage("Camera preview is unavailable.");
+        return;
+      }
+
+      video.srcObject = stream;
+      await video.play();
+      setStatus("scanning");
+      setMessage("Point your camera at the ChromeRemote QR code.");
+
+      const nativeScanning = await scanWithNativeDetector(video);
+      if (!nativeScanning) {
+        await scanWithZxing(video);
+      }
+    } catch (error) {
+      cleanupCamera();
+      setStatus("error");
+      const name = error instanceof DOMException ? error.name : "";
+      setMessage(name === "NotAllowedError" ? "Camera permission was denied." : "Camera is unavailable.");
+    }
+  };
+
+  return (
+    <main className="remote-shell scanner-shell">
+      <header className="topbar">
+        <div>
+          <h1>ChromeRemote</h1>
+          <p>Pair with Chrome</p>
+        </div>
+      </header>
+
+      <section className="scanner-panel" aria-live="polite">
+        <h2>Scan ChromeRemote QR</h2>
+        <p>{message}</p>
+        <div className="camera-frame">
+          <video ref={videoRef} muted playsInline aria-label="Camera preview" />
+          {status !== "scanning" ? <span>Camera Preview</span> : null}
+        </div>
+        {status === "idle" || status === "error" ? (
+          <button type="button" className="primary-control" onClick={() => void openCamera()}>
+            {status === "error" ? "Try Again" : "Open Camera"}
+          </button>
+        ) : null}
+      </section>
+    </main>
+  );
+}
+
+function ScanAgain({ message, onScanAgain }: { message: string; onScanAgain: () => void }) {
+  return (
+    <main className="remote-shell scanner-shell">
+      <header className="topbar">
+        <div>
+          <h1>ChromeRemote</h1>
+          <p>Pair with Chrome</p>
+        </div>
+      </header>
+      <section className="scanner-panel" aria-live="polite">
+        <h2>Scan ChromeRemote QR</h2>
+        <p>{message}</p>
+        <button type="button" className="primary-control" onClick={onScanAgain}>
+          Scan Again
+        </button>
+      </section>
     </main>
   );
 }

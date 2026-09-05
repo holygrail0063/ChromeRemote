@@ -4,5 +4,5 @@
     "noEmit": true,
     "rootDir": ".."
   },
-  "include": ["src", "../src/shared/messages.ts", "../src/shared/player-state.ts", "../src/shared/remote-protocol.ts"]
+  "include": ["src", "../src/shared/messages.ts", "../src/shared/pairing.ts", "../src/shared/player-state.ts", "../src/shared/remote-protocol.ts"]
 }

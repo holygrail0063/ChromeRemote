@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   backgroundUnavailableResponse,
+  decodePairingPayload,
+  encodePairingPayload,
   isCreateRemoteSessionResponse,
   isPairingRequest,
   isValidRemoteOrigin,
+  stopMediaStreamTracks,
   validateControllerUrl
 } from "../src/shared/pairing.js";
 
@@ -67,4 +70,45 @@ test("production controller URL validation rejects local and malformed phone lin
 
 test("development controller URL validation permits localhost phone links", () => {
   assert.equal(validateControllerUrl("http://localhost:8787/r/session#controller", false).ok, true);
+});
+
+test("pairing payload round trips valid CR1 payloads", () => {
+  const rawPayload = encodePairingPayload("session_123456", "controller-token_123456");
+  assert.equal(rawPayload, "CR1:session_123456:controller-token_123456");
+
+  const decoded = decodePairingPayload(rawPayload);
+  assert.equal(decoded.ok, true);
+  assert.deepEqual(decoded.ok ? decoded.payload : null, {
+    sessionId: "session_123456",
+    controllerToken: "controller-token_123456"
+  });
+});
+
+test("pairing payload rejects wrong protocol version", () => {
+  assert.equal(decodePairingPayload("CR2:session_123456:controller-token_123456").ok, false);
+});
+
+test("pairing payload rejects missing session id", () => {
+  assert.equal(decodePairingPayload("CR1::controller-token_123456").ok, false);
+});
+
+test("pairing payload rejects missing token", () => {
+  assert.equal(decodePairingPayload("CR1:session_123456:").ok, false);
+});
+
+test("pairing payload rejects malformed QR data", () => {
+  assert.equal(decodePairingPayload("https://example.com/not-chromeremote").ok, false);
+  assert.equal(decodePairingPayload("CR1:session:token:extra").ok, false);
+});
+
+test("camera cleanup helper stops every media stream track", () => {
+  const stopped: string[] = [];
+  stopMediaStreamTracks({
+    getTracks: () => [
+      { stop: () => stopped.push("video") },
+      { stop: () => stopped.push("audio") }
+    ]
+  });
+
+  assert.deepEqual(stopped, ["video", "audio"]);
 });

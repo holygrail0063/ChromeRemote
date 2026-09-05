@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
@@ -7,12 +8,21 @@ const rootDir = process.cwd();
 const distDir = resolve(rootDir, "dist");
 const mode = process.env.MODE ?? process.env.NODE_ENV ?? "production";
 Object.assign(process.env, loadEnv(mode, rootDir, ""));
+process.env.VITE_CHROMEREMOTE_BUILD_ID = process.env.VITE_CHROMEREMOTE_BUILD_ID ?? getBuildId();
 
 const assetNames = {
   entryFileNames: "assets/[name].js",
   chunkFileNames: "assets/[name].js",
   assetFileNames: "assets/[name][extname]"
 };
+
+function getBuildId() {
+  try {
+    return execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: rootDir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {
+    return new Date().toISOString().replace(/[-:]/g, "").slice(0, 13);
+  }
+}
 
 function relayHostPermission() {
   const origin = process.env.VITE_REMOTE_HTTP_ORIGIN;

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { decodePairingPayload, encodePairingPayload } from "../src/shared/pairing.js";
 import {
   authenticate,
   clearSessionsForTests,
@@ -124,4 +125,31 @@ test("production public origin requires HTTPS", () => {
     () => normalizePublicOrigin("http://chromeremote-production.up.railway.app", { allowLocalOrigins: false, requireHttps: true }),
     /HTTPS/i
   );
+});
+
+test("successful scanned controller payload authenticates to its session", () => {
+  clearSessionsForTests();
+  const tokens = createSession(Date.now(), "https://chromeremote-production.up.railway.app", {
+    allowLocalOrigins: false,
+    requireHttps: true
+  });
+  const scanned = decodePairingPayload(encodePairingPayload(tokens.sessionId, tokens.controllerToken));
+
+  assert.equal(scanned.ok, true);
+  const auth = scanned.ok ? authenticate(scanned.payload.sessionId, "controller", scanned.payload.controllerToken, connection("controller")) : null;
+  assert.equal(auth?.ok, true);
+});
+
+test("expired scanned controller payload cannot authenticate", () => {
+  clearSessionsForTests();
+  const tokens = createSession(Date.now() - 5 * 60 * 60 * 1000, "https://chromeremote-production.up.railway.app", {
+    allowLocalOrigins: false,
+    requireHttps: true
+  });
+  const scanned = decodePairingPayload(encodePairingPayload(tokens.sessionId, tokens.controllerToken));
+
+  assert.equal(scanned.ok, true);
+  const auth = scanned.ok ? authenticate(scanned.payload.sessionId, "controller", scanned.payload.controllerToken, connection("controller")) : null;
+  assert.equal(auth?.ok, false);
+  assert.equal(auth?.ok ? "" : auth?.errorCode, "AUTH_FAILED");
 });

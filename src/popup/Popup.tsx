@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 import { PLAYBACK_RATES, type PlaybackRate, type PlayerCommand, type PlayerResponse } from "../shared/messages";
 import { getNetflixPageContext } from "../shared/netflix-url";
-import { backgroundUnavailableResponse, validateControllerUrl, type PairingResponse, type PairingState } from "../shared/pairing";
+import { backgroundUnavailableResponse, decodePairingPayload, type PairingResponse, type PairingState } from "../shared/pairing";
 import type { PlayerState } from "../shared/player-state";
 
 type ConnectionStatus = "checking" | "connected" | "player-loading" | "netflix-browsing" | "not-netflix" | "communication-error";
@@ -41,6 +41,7 @@ const formatPlaybackRate = (rate: number) => `${Number.isInteger(rate) ? rate.to
 const clampVolume = (value: number) => Math.min(Math.max(value, 0), 1);
 
 const initialPairingState: PairingState = { status: "not-paired" };
+const buildId = import.meta.env.VITE_CHROMEREMOTE_BUILD_ID ?? "dev";
 
 async function getActiveTab(): Promise<chrome.tabs.Tab | null> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -196,13 +197,13 @@ export function Popup() {
   }, []);
 
   useEffect(() => {
-    if (pairing.status !== "waiting" || !pairing.remoteUrl) {
+    if (pairing.status !== "waiting" || !pairing.pairingPayload) {
       setQrDataUrl(null);
       setQrError(null);
       return;
     }
 
-    const validation = validateControllerUrl(pairing.remoteUrl, import.meta.env.PROD);
+    const validation = decodePairingPayload(pairing.pairingPayload);
     if (!validation.ok) {
       setQrDataUrl(null);
       setQrError(validation.error);
@@ -212,7 +213,7 @@ export function Popup() {
     let cancelled = false;
     setQrDataUrl(null);
     setQrError(null);
-    void QRCode.toDataURL(pairing.remoteUrl, {
+    void QRCode.toDataURL(pairing.pairingPayload, {
       errorCorrectionLevel: "M",
       margin: 4,
       width: 204,
@@ -235,7 +236,7 @@ export function Popup() {
     return () => {
       cancelled = true;
     };
-  }, [pairing.remoteUrl, pairing.status]);
+  }, [pairing.pairingPayload, pairing.status]);
 
   const runCommand = async (command: PlayerCommand) => {
     setBusyCommand(command.type);
@@ -432,21 +433,24 @@ export function Popup() {
         <div className="phone-title">Control from Phone</div>
         {pairing.status === "not-paired" ? (
           <button type="button" className="phone-action" onClick={() => void connectPhone()}>
-            Connect Phone
+            Pair Phone
           </button>
         ) : null}
         {pairing.status === "creating" ? <div className="phone-copy">Creating secure session...</div> : null}
-        {pairing.status === "waiting" && pairing.remoteUrl ? (
+        {pairing.status === "waiting" && pairing.pairingPayload ? (
           <>
             {qrError ? <div className="phone-error">{qrError}</div> : null}
             {!qrError && qrDataUrl ? <img className="qr-code" src={qrDataUrl} width="204" height="204" alt="Phone pairing QR code" /> : null}
             {!qrError && !qrDataUrl ? <div className="phone-copy">Preparing QR code...</div> : null}
             {!qrError ? (
               <>
-                <div className="phone-copy">Scan with your phone</div>
+                <div className="phone-copy">Open ChromeRemote on your phone and scan this code.</div>
                 <div className="phone-status">
                   <span aria-hidden="true" /> Waiting for phone...
                 </div>
+                <button type="button" className="phone-action" onClick={() => void disconnectPhone()}>
+                  Cancel Pairing
+                </button>
               </>
             ) : null}
           </>
@@ -484,6 +488,7 @@ export function Popup() {
       </section>
 
       {state.error ? <div className="error-message">{state.error}</div> : null}
+      <div className="build-meta">Build {buildId}</div>
     </main>
   );
 }

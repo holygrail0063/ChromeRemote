@@ -10,6 +10,7 @@ export type PairingState = {
   status: PairingStatus;
   sessionId?: string;
   remoteUrl?: string;
+  pairingPayload?: string;
   expiresAt?: string;
   pairedTabId?: number;
   errorCode?: PairingErrorCode;
@@ -49,10 +50,27 @@ export type ControllerUrlValidationResult =
   | { ok: true; url: URL }
   | { ok: false; errorCode: "REMOTE_SERVER_NOT_CONFIGURED" | "SESSION_RESPONSE_INVALID"; error: string };
 
+export type PairingPayload = {
+  sessionId: string;
+  controllerToken: string;
+};
+
+export type PairingPayloadResult =
+  | { ok: true; payload: PairingPayload }
+  | { ok: false; error: string };
+
 const phoneAccessConfigurationError = "ChromeRemote remote server is not configured for phone access.";
+const pairingPayloadPrefix = "CR1";
+const safePairingFieldPattern = /^[A-Za-z0-9_-]+$/;
+const minPairingFieldLength = 8;
+const maxPairingFieldLength = 128;
 
 function isLocalPhoneHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === [127, 0, 0, 1].join(".") || hostname === [0, 0, 0, 0].join(".");
+}
+
+function isSafePairingField(value: string): boolean {
+  return value.length >= minPairingFieldLength && value.length <= maxPairingFieldLength && safePairingFieldPattern.test(value);
 }
 
 export function isValidRemoteOrigin(origin: string): boolean {
@@ -102,6 +120,34 @@ export function validateControllerUrl(remoteUrl: string, production: boolean): C
   }
 
   return { ok: true, url };
+}
+
+export function encodePairingPayload(sessionId: string, controllerToken: string): string {
+  if (!isSafePairingField(sessionId) || !isSafePairingField(controllerToken)) {
+    throw new Error("Invalid ChromeRemote pairing payload fields.");
+  }
+
+  return `${pairingPayloadPrefix}:${sessionId}:${controllerToken}`;
+}
+
+export function decodePairingPayload(rawPayload: string): PairingPayloadResult {
+  const fields = rawPayload.trim().split(":");
+  if (fields.length !== 3 || fields[0] !== pairingPayloadPrefix) {
+    return { ok: false, error: "That isn't a ChromeRemote pairing code." };
+  }
+
+  const [, sessionId, controllerToken] = fields;
+  if (!isSafePairingField(sessionId) || !isSafePairingField(controllerToken)) {
+    return { ok: false, error: "That isn't a ChromeRemote pairing code." };
+  }
+
+  return { ok: true, payload: { sessionId, controllerToken } };
+}
+
+export function stopMediaStreamTracks(stream: { getTracks(): Array<{ stop(): void }> }): void {
+  for (const track of stream.getTracks()) {
+    track.stop();
+  }
 }
 
 export function isPairingRequest(value: unknown): value is PairingRequest {
