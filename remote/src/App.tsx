@@ -26,6 +26,87 @@ type ScannerControls = {
   stop(): void;
 };
 
+type IconName =
+  | "next"
+  | "fullscreen"
+  | "exit-fullscreen"
+  | "mute"
+  | "volume"
+  | "rewind"
+  | "play"
+  | "pause"
+  | "forward"
+  | "speed";
+
+function Icon({ name }: { name: IconName }) {
+  return (
+    <svg className="control-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      {name === "next" ? (
+        <>
+          <path d="M5 5l9 7-9 7V5z" />
+          <path d="M17 5v14" />
+        </>
+      ) : null}
+      {name === "fullscreen" ? (
+        <>
+          <path d="M4 9V4h5" />
+          <path d="M15 4h5v5" />
+          <path d="M20 15v5h-5" />
+          <path d="M9 20H4v-5" />
+        </>
+      ) : null}
+      {name === "exit-fullscreen" ? (
+        <>
+          <path d="M9 4v5H4" />
+          <path d="M15 4v5h5" />
+          <path d="M15 20v-5h5" />
+          <path d="M9 20v-5H4" />
+        </>
+      ) : null}
+      {name === "mute" ? (
+        <>
+          <path d="M5 10v4h4l5 4V6l-5 4H5z" />
+          <path d="M18 9l4 6" />
+          <path d="M22 9l-4 6" />
+        </>
+      ) : null}
+      {name === "volume" ? (
+        <>
+          <path d="M5 10v4h4l5 4V6l-5 4H5z" />
+          <path d="M17 9c1.3 1.7 1.3 4.3 0 6" />
+          <path d="M20 7c2.6 3 2.6 7 0 10" />
+        </>
+      ) : null}
+      {name === "rewind" ? (
+        <>
+          <path d="M7 8H3V4" />
+          <path d="M3.5 8.5A8 8 0 1 1 4 17" />
+        </>
+      ) : null}
+      {name === "play" ? <path d="M8 5l11 7-11 7V5z" /> : null}
+      {name === "pause" ? (
+        <>
+          <path d="M7 5h4v14H7z" />
+          <path d="M14 5h4v14h-4z" />
+        </>
+      ) : null}
+      {name === "forward" ? (
+        <>
+          <path d="M17 8h4V4" />
+          <path d="M20.5 8.5A8 8 0 1 0 20 17" />
+        </>
+      ) : null}
+      {name === "speed" ? (
+        <>
+          <path d="M4 16a8 8 0 0 1 16 0" />
+          <path d="M12 12l4-4" />
+          <path d="M7 18h10" />
+        </>
+      ) : null}
+    </svg>
+  );
+}
+
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) {
     return "0:00";
@@ -190,22 +271,29 @@ export function App() {
 
       <section className="media-actions" aria-label="Netflix media actions">
         <button type="button" disabled={disabled} onClick={() => runCommand({ type: "NEXT_EPISODE" })}>
-          Next Episode
+          <Icon name="next" />
+          <span>Next Episode</span>
         </button>
         <button type="button" disabled={disabled} onClick={() => runCommand({ type: "FULLSCREEN" })}>
-          Fullscreen
+          <Icon name="fullscreen" />
+          <span>Fullscreen</span>
         </button>
         <button type="button" disabled={disabled} onClick={() => runCommand({ type: "EXIT_FULLSCREEN" })}>
-          Exit Fullscreen
+          <Icon name="exit-fullscreen" />
+          <span>Exit Fullscreen</span>
         </button>
         <button type="button" disabled={disabled} onClick={() => runCommand({ type: "TOGGLE_MUTE" })}>
-          {player?.muted ? "Unmute" : "Mute"}
+          <Icon name={player?.muted ? "volume" : "mute"} />
+          <span>{player?.muted ? "Unmute" : "Mute"}</span>
         </button>
       </section>
 
       <section className="volume-panel" aria-label="Volume controls">
         <div className="volume-header">
-          <span>Volume</span>
+          <span className="section-label">
+            <Icon name="volume" />
+            <span>Volume</span>
+          </span>
           <strong>{volume}%</strong>
         </div>
         <div className="volume-row">
@@ -250,7 +338,8 @@ export function App() {
 
       <section className="controls" aria-label="Playback controls">
         <button type="button" disabled={disabled} onClick={() => runCommand({ type: "SEEK_RELATIVE", seconds: -10 })}>
-          -10
+          <Icon name="rewind" />
+          <span>-10</span>
         </button>
         <button
           type="button"
@@ -258,15 +347,22 @@ export function App() {
           disabled={disabled}
           onClick={() => runCommand({ type: player?.playing ? "PAUSE" : "PLAY" })}
         >
-          {player?.playing ? "Pause" : "Play"}
+          <Icon name={player?.playing ? "pause" : "play"} />
+          <span>{player?.playing ? "Pause" : "Play"}</span>
         </button>
         <button type="button" disabled={disabled} onClick={() => runCommand({ type: "SEEK_RELATIVE", seconds: 10 })}>
-          +10
+          <Icon name="forward" />
+          <span>+10</span>
         </button>
       </section>
 
       <section className="speed-panel" aria-label="Playback speed controls">
-        <div className="speed-header">Playback Speed</div>
+        <div className="speed-header">
+          <span className="section-label">
+            <Icon name="speed" />
+            <span>Playback Speed</span>
+          </span>
+        </div>
         <div className="speed-options">
           {PLAYBACK_RATES.map((rate) => (
             <button
@@ -282,21 +378,6 @@ export function App() {
           ))}
         </div>
       </section>
-
-      <footer className="state-grid" aria-label="Player status">
-        <div>
-          <span>Playback</span>
-          <strong>{player?.playing ? "Playing" : "Paused"}</strong>
-        </div>
-        <div>
-          <span>Speed</span>
-          <strong>{formatPlaybackRate(playbackRate)}</strong>
-        </div>
-        <div>
-          <span>Muted</span>
-          <strong>{player?.muted ? "Yes" : "No"}</strong>
-        </div>
-      </footer>
     </main>
   );
 }
