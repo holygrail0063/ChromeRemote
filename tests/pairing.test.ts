@@ -72,16 +72,31 @@ test("development controller URL validation permits localhost phone links", () =
   assert.equal(validateControllerUrl("http://localhost:8787/r/session#controller", false).ok, true);
 });
 
-test("pairing payload round trips valid CR1 payloads", () => {
-  const rawPayload = encodePairingPayload("session_123456", "controller-token_123456");
-  assert.equal(rawPayload, "CR1:session_123456:controller-token_123456");
+test("pairing QR uses a camera-friendly URL and round trips the CR1 payload", () => {
+  const qrValue = encodePairingPayload("session_123456", "controller-token_123456");
+  assert.equal(
+    qrValue,
+    "https://chromeremote-production.up.railway.app/remote_session#CR1:session_123456:controller-token_123456"
+  );
 
-  const decoded = decodePairingPayload(rawPayload);
+  const decoded = decodePairingPayload(qrValue);
   assert.equal(decoded.ok, true);
   assert.deepEqual(decoded.ok ? decoded.payload : null, {
     sessionId: "session_123456",
     controllerToken: "controller-token_123456"
   });
+});
+
+test("pairing decoder still accepts raw CR1 payloads from older extension builds", () => {
+  const decoded = decodePairingPayload("CR1:session_123456:controller-token_123456");
+  assert.equal(decoded.ok, true);
+});
+
+test("pairing QR can target an explicit development origin", () => {
+  assert.equal(
+    encodePairingPayload("session_123456", "controller-token_123456", "http://localhost:5174"),
+    "http://localhost:5174/remote_session#CR1:session_123456:controller-token_123456"
+  );
 });
 
 test("pairing payload rejects wrong protocol version", () => {
@@ -99,6 +114,7 @@ test("pairing payload rejects missing token", () => {
 test("pairing payload rejects malformed QR data", () => {
   assert.equal(decodePairingPayload("https://example.com/not-chromeremote").ok, false);
   assert.equal(decodePairingPayload("CR1:session:token:extra").ok, false);
+  assert.equal(decodePairingPayload("https://example.com/remote_session?token=nope#CR1:session_123456:controller-token_123456").ok, false);
 });
 
 test("camera cleanup helper stops every media stream track", () => {
