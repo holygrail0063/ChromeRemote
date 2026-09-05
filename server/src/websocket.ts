@@ -1,7 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
-import { authenticate, forwardFromController, forwardFromPlayer, removeConnection, type RemoteSession, type SessionConnection } from "./sessions.js";
+import {
+  authenticate,
+  forwardFromController,
+  forwardFromPlayer,
+  invalidateSession,
+  removeConnection,
+  type RemoteSession,
+  type SessionConnection
+} from "./sessions.js";
 import { isRemoteClientMessage, parseRemoteMessage } from "../../src/shared/remote-protocol.js";
 
 type ClientContext = {
@@ -181,6 +189,9 @@ export function handleUpgrade(request: IncomingMessage, socket: Socket): void {
 
         if (message.type === "PING") {
           context.connection.send({ type: "PONG" });
+        } else if (context.role === "controller" && message.type === "END_SESSION") {
+          invalidateSession(context.session.sessionId);
+          return;
         } else if (context.role === "controller" && message.type === "COMMAND") {
           const forwarded = forwardFromController(context.session, message);
           if (!forwarded.ok) {
