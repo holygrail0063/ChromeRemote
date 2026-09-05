@@ -10,6 +10,7 @@ const mode = process.env.MODE ?? process.env.NODE_ENV ?? "production";
 Object.assign(process.env, loadEnv(mode, rootDir, ""));
 process.env.VITE_CHROMEREMOTE_BUILD_ID = process.env.VITE_CHROMEREMOTE_BUILD_ID ?? getBuildId();
 
+const DEFAULT_PRODUCTION_HTTP_ORIGIN = "https://chromeremote-production.up.railway.app";
 const assetNames = {
   entryFileNames: "assets/[name].js",
   chunkFileNames: "assets/[name].js",
@@ -25,11 +26,7 @@ function getBuildId() {
 }
 
 function relayHostPermission() {
-  const origin = process.env.VITE_REMOTE_HTTP_ORIGIN;
-  if (!origin) {
-    throw new Error("VITE_REMOTE_HTTP_ORIGIN is required to build the extension.");
-  }
-
+  const origin = process.env.VITE_REMOTE_HTTP_ORIGIN ?? DEFAULT_PRODUCTION_HTTP_ORIGIN;
   const url = new URL(origin);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("VITE_REMOTE_HTTP_ORIGIN must use http or https.");
@@ -43,6 +40,14 @@ await build({
   root: rootDir,
   publicDir: resolve(rootDir, "public"),
   plugins: [react()],
+  define: {
+    "import.meta.env.VITE_REMOTE_HTTP_ORIGIN": JSON.stringify(process.env.VITE_REMOTE_HTTP_ORIGIN ?? DEFAULT_PRODUCTION_HTTP_ORIGIN),
+    "import.meta.env.VITE_REMOTE_WS_ORIGIN": JSON.stringify(
+      process.env.VITE_REMOTE_WS_ORIGIN ??
+        (process.env.VITE_REMOTE_HTTP_ORIGIN ?? DEFAULT_PRODUCTION_HTTP_ORIGIN).replace(/^https:/, "wss:").replace(/^http:/, "ws:")
+    ),
+    "import.meta.env.VITE_REMOTE_WEB_ORIGIN": JSON.stringify(process.env.VITE_REMOTE_WEB_ORIGIN ?? process.env.VITE_REMOTE_HTTP_ORIGIN ?? DEFAULT_PRODUCTION_HTTP_ORIGIN)
+  },
   build: {
     outDir: distDir,
     emptyOutDir: true,
@@ -71,6 +76,14 @@ for (const entry of [
     configFile: false,
     root: rootDir,
     publicDir: false,
+    define: {
+      "import.meta.env.VITE_REMOTE_HTTP_ORIGIN": JSON.stringify(process.env.VITE_REMOTE_HTTP_ORIGIN ?? DEFAULT_PRODUCTION_HTTP_ORIGIN),
+      "import.meta.env.VITE_REMOTE_WS_ORIGIN": JSON.stringify(
+        process.env.VITE_REMOTE_WS_ORIGIN ??
+          (process.env.VITE_REMOTE_HTTP_ORIGIN ?? DEFAULT_PRODUCTION_HTTP_ORIGIN).replace(/^https:/, "wss:").replace(/^http:/, "ws:")
+      ),
+      "import.meta.env.VITE_REMOTE_WEB_ORIGIN": JSON.stringify(process.env.VITE_REMOTE_WEB_ORIGIN ?? process.env.VITE_REMOTE_HTTP_ORIGIN ?? DEFAULT_PRODUCTION_HTTP_ORIGIN)
+    },
     build: {
       outDir: distDir,
       emptyOutDir: false,
