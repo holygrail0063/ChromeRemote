@@ -190,6 +190,30 @@ button.status-pill {
   text-overflow: ellipsis;
 }
 
+.control-icon {
+  width: 1.2em;
+  height: 1.2em;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.control-icon path[d$="V5z"],
+.control-icon path[d$="7V5z"] {
+  fill: currentColor;
+  stroke: none;
+}
+
+.section-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
 .controls {
   display: grid;
   grid-template-columns: minmax(70px, 0.75fr) minmax(150px, 1.7fr) minmax(70px, 0.75fr);
@@ -198,7 +222,17 @@ button.status-pill {
 
 .controls button,
 .media-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(6px, 1.8vw, 9px);
   min-height: clamp(58px, 14vw, 70px);
+}
+
+.controls .control-icon,
+.media-actions .control-icon {
+  width: clamp(18px, 5vw, 23px);
+  height: clamp(18px, 5vw, 23px);
 }
 
 .primary-control {
@@ -225,6 +259,12 @@ button.status-pill {
 .speed-header,
 .volume-header {
   font-size: clamp(0.95rem, 4vw, 1.05rem);
+}
+
+.speed-header .control-icon,
+.volume-header .control-icon {
+  width: 1.15em;
+  height: 1.15em;
 }
 
 .speed-options {
@@ -269,34 +309,6 @@ input[type="range"] {
 
 .volume-row input[type="range"] {
   min-height: 42px;
-}
-
-.state-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  padding: 14px 0 2px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.state-grid > div {
-  display: grid;
-  justify-items: center;
-  gap: 6px;
-  min-width: 0;
-  text-align: center;
-}
-
-.state-grid span {
-  color: #949494;
-  font-size: clamp(0.78rem, 3.2vw, 0.9rem);
-}
-
-.state-grid strong {
-  overflow: hidden;
-  color: #fff;
-  font-size: clamp(0.95rem, 3.9vw, 1.05rem);
-  text-overflow: ellipsis;
 }
 
 .readout {
@@ -402,10 +414,6 @@ input[type="range"] {
 
   .speed-options button {
     font-size: 0.72rem;
-  }
-
-  .state-grid {
-    gap: 6px;
   }
 }
 
