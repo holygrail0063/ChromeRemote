@@ -25,69 +25,45 @@ The extension popup itself is intentionally simple. It is used for Netflix statu
 
 ---
 
-# Quick Start
+# Install ChromeRemote
 
-## Requirements
+## Recommended: download the ready-to-use extension ZIP
 
-You need:
+Normal users do **not** need Node.js, npm, Railway, or any build tools.
 
-- Google Chrome on a desktop or laptop
-- Node.js 18 or newer
-- npm
-- A Netflix account
-- A phone with a modern browser and camera
+1. Open the repository's **Releases** page:
+   `https://github.com/holygrail0063/ChromeRemote/releases`
+2. Open the latest ChromeRemote release.
+3. Download **`ChromeRemote-Extension.zip`** from the release assets.
+4. Extract the ZIP to a permanent folder on your computer. Do not delete this folder after loading the extension.
+5. In desktop Chrome, open `chrome://extensions`.
+6. Turn on **Developer mode** in the top-right corner.
+7. Click **Load unpacked**.
+8. Select the folder you extracted from `ChromeRemote-Extension.zip`.
+9. Pin ChromeRemote from Chrome's Extensions menu if you want quick access to it.
 
-ChromeRemote is not currently distributed through the Chrome Web Store, so it is installed as an unpacked extension from this repository.
-
-## 1. Download ChromeRemote
-
-Either clone the repository:
-
-```bash
-git clone https://github.com/holygrail0063/ChromeRemote.git
-cd ChromeRemote
-```
-
-Or use GitHub's **Code -> Download ZIP**, extract the ZIP, and open a terminal in the extracted `ChromeRemote` folder.
-
-## 2. Install dependencies
-
-```bash
-npm ci
-```
-
-## 3. Build the Chrome extension
-
-For the hosted ChromeRemote service, run:
-
-```bash
-npm run build:extension:production
-```
-
-The built extension will be created in:
-
-```text
-dist/
-```
-
-The production build is already configured to use:
+That is the full installation. The prebuilt extension already points to the hosted ChromeRemote phone/relay service:
 
 ```text
 https://chromeremote-production.up.railway.app
 ```
 
-You do not need to create a Railway account just to use the hosted version.
+You do not need to deploy your own server to use the hosted version.
 
-## 4. Load ChromeRemote into Chrome
+> ChromeRemote is not currently published in the Chrome Web Store, so Chrome's **Load unpacked** flow is required.
 
-1. Open Chrome.
-2. Go to `chrome://extensions`.
-3. Turn on **Developer mode** in the top-right corner.
-4. Click **Load unpacked**.
-5. Select the `dist` folder inside the ChromeRemote project.
-6. Pin ChromeRemote from Chrome's Extensions menu if you want quick access to it.
+## Optional: build from source
 
-If you rebuild ChromeRemote later, return to `chrome://extensions` and click **Reload** on the ChromeRemote extension.
+Developers who prefer to build the extension themselves can clone the repository:
+
+```bash
+git clone https://github.com/holygrail0063/ChromeRemote.git
+cd ChromeRemote
+npm ci
+npm run build:extension:production
+```
+
+Then open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the generated `dist/` folder.
 
 ---
 
@@ -127,15 +103,15 @@ That QR code is unique to the pairing session. It contains a randomly generated 
 
 You have two supported ways to connect the phone.
 
-### Option A: Scan with the normal phone camera
+### Option A: scan with the normal phone camera
 
 Open the normal camera app on your phone and point it at the ChromeRemote QR code.
 
 The QR opens the ChromeRemote phone page and includes the temporary pairing information in the URL fragment.
 
-Tap the link shown by the phone.
+Tap the link shown by the phone. ChromeRemote opens already connected to that desktop session.
 
-### Option B: Use the ChromeRemote scanner
+### Option B: use the ChromeRemote scanner
 
 On the phone, open:
 
@@ -171,9 +147,9 @@ Disconnecting invalidates the temporary session so the old pairing URL can no lo
 
 ---
 
-# Phone Remote Layout
+# Phone Remote Controls
 
-The phone remote includes:
+The phone remote currently provides:
 
 ```text
 ChromeRemote                         Connected
@@ -195,6 +171,18 @@ Playback Speed
 ```
 
 The layout automatically scales for phone-sized displays.
+
+---
+
+# Updating the Extension
+
+When a newer ChromeRemote release is available:
+
+1. Download the new `ChromeRemote-Extension.zip` from GitHub Releases.
+2. Extract it to your ChromeRemote extension folder, replacing the previous files, or extract it to a new folder.
+3. Open `chrome://extensions`.
+4. Click **Reload** on ChromeRemote. If you used a new folder, remove the old unpacked extension and load the new folder instead.
+5. Refresh any open Netflix watch tabs.
 
 ---
 
@@ -292,6 +280,10 @@ ChromeRemote does not request `<all_urls>`, cookie access, debugger access, nati
 
 # Troubleshooting
 
+## Chrome says the extension folder cannot be loaded
+
+Make sure you selected the **extracted release folder containing `manifest.json`**, not the ZIP file itself and not an extra parent folder.
+
 ## The extension says Netflix is not ready
 
 Make sure:
@@ -299,7 +291,7 @@ Make sure:
 1. Netflix is open in Chrome.
 2. You are on a `/watch/...` page.
 3. A movie or episode has actually loaded.
-4. Refresh Netflix after reloading or rebuilding the extension.
+4. Refresh Netflix after reloading or updating the extension.
 
 ## Pair Phone does not show a QR code
 
@@ -336,17 +328,11 @@ If the session has expired or was disconnected, create a new pairing session fro
 
 Wait a moment for Netflix to replace or update its player, then try again. ChromeRemote resolves the current Netflix player instead of permanently holding the original video element.
 
-## I rebuilt the project but Chrome still shows the old extension
-
-After building:
-
-1. Open `chrome://extensions`.
-2. Click **Reload** on ChromeRemote.
-3. Refresh the Netflix tab.
-
 ---
 
 # Development
+
+Normal users can ignore this section and install the prebuilt release ZIP instead.
 
 Install dependencies:
 
@@ -401,6 +387,22 @@ Remember: `localhost` on a phone means the phone itself, not your computer.
 
 ---
 
+# Extension Release Packaging
+
+The repository automatically builds a ready-to-load extension package with GitHub Actions.
+
+The release workflow:
+
+1. installs dependencies with `npm ci`
+2. runs `npm run build:extension:production`
+3. verifies the production extension build
+4. packages the contents of `dist/` as `ChromeRemote-Extension.zip`
+5. publishes that ZIP under the GitHub release matching the version in `package.json`
+
+This keeps the public download package separate from source code and ensures users receive the production-configured extension.
+
+---
+
 # Self-Hosting the Relay
 
 The repository includes `railway.json` and can be deployed as one Railway service.
@@ -447,6 +449,7 @@ For the current in-memory session implementation, run a single relay replica. Ho
 
 ```text
 ChromeRemote/
+├─ .github/workflows/  automated extension release packaging
 ├─ src/
 │  ├─ background/      MV3 service worker and phone-session bridge
 │  ├─ content/         Netflix tab content script
@@ -469,4 +472,4 @@ ChromeRemote/
 - ChromeRemote currently targets Netflix in desktop Chrome.
 - It is an independent project and is not affiliated with or endorsed by Netflix.
 - Netflix can change its web player implementation at any time, which may require ChromeRemote compatibility updates.
-- This repository currently installs the extension from source rather than from the Chrome Web Store.
+- The extension is currently installed as an unpacked extension rather than through the Chrome Web Store.
