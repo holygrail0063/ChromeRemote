@@ -97,7 +97,8 @@ function sendConfigError(request: import("node:http").IncomingMessage, response:
 async function getStaticRoot(): Promise<string | null> {
   for (const candidate of staticCandidates) {
     try {
-      if ((await stat(candidate)).isDirectory()) {
+      const indexPath = join(candidate, "index.html");
+      if ((await stat(candidate)).isDirectory() && (await stat(indexPath)).isFile()) {
         return candidate;
       }
     } catch {
@@ -232,6 +233,13 @@ async function handleRequest(request: import("node:http").IncomingMessage, respo
 
 server.on("upgrade", handleUpgrade);
 
+const startupStaticRoot = await getStaticRoot();
+if (!startupStaticRoot) {
+  console.error("ChromeRemote mobile app build is missing. Run npm run build:railway before starting the server.");
+  process.exit(1);
+}
+
 server.listen(port, host, () => {
   console.log(`ChromeRemote relay listening on ${host}:${port}`);
+  console.log(`ChromeRemote mobile app served from ${startupStaticRoot}`);
 });
