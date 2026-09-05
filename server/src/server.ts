@@ -9,7 +9,16 @@ import { handleUpgrade } from "./websocket.js";
 const port = Number(process.env.PORT ?? 8787);
 const host = process.env.HOST ?? "0.0.0.0";
 const developmentPublicOrigin = "http://localhost:8787";
-const publicOrigin = (process.env.PUBLIC_ORIGIN ?? developmentPublicOrigin).replace(/\/$/, "");
+const productionPublicOrigin = "https://chromeremote-production.up.railway.app";
+
+function isProductionRuntime(): boolean {
+  return (
+    process.env.NODE_ENV === "production" ||
+    Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_SERVICE_ID)
+  );
+}
+
+const publicOrigin = (process.env.PUBLIC_ORIGIN ?? (isProductionRuntime() ? productionPublicOrigin : developmentPublicOrigin)).replace(/\/$/, "");
 const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? publicOrigin)
   .split(",")
   .map((origin) => origin.trim())
@@ -46,26 +55,19 @@ function getCorsOrigin(request: import("node:http").IncomingMessage): string | u
 
 function getRequestPublicOrigin(request: import("node:http").IncomingMessage): string {
   if (process.env.PUBLIC_ORIGIN) {
-    return process.env.PUBLIC_ORIGIN;
+    return process.env.PUBLIC_ORIGIN.replace(/\/$/, "");
   }
 
   if (isProductionRuntime()) {
-    throw new Error("PUBLIC_ORIGIN is required in production.");
+    return productionPublicOrigin;
   }
 
   const forwardedProto = request.headers["x-forwarded-proto"];
   const proto = typeof forwardedProto === "string" ? forwardedProto.split(",")[0].trim() : "http";
-  const host = request.headers["x-forwarded-host"] ?? request.headers.host;
-  const hostname = Array.isArray(host) ? host[0] : host;
+  const forwardedHost = request.headers["x-forwarded-host"] ?? request.headers.host;
+  const requestHost = Array.isArray(forwardedHost) ? forwardedHost[0] : forwardedHost;
 
-  return hostname ? `${proto}://${hostname}` : publicOrigin;
-}
-
-function isProductionRuntime(): boolean {
-  return (
-    process.env.NODE_ENV === "production" ||
-    Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_SERVICE_ID)
-  );
+  return requestHost ? `${proto}://${requestHost}` : publicOrigin;
 }
 
 function baseHeaders(request: import("node:http").IncomingMessage): Record<string, string> {
@@ -84,14 +86,6 @@ function sendJson(request: import("node:http").IncomingMessage, response: import
     "content-type": "application/json; charset=utf-8"
   });
   response.end(JSON.stringify(body));
-}
-
-function sendConfigError(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse): void {
-  sendJson(request, response, 500, {
-    ok: false,
-    errorCode: "REMOTE_SERVER_NOT_CONFIGURED",
-    message: "ChromeRemote remote server is not configured for phone access."
-  });
 }
 
 async function getStaticRoot(): Promise<string | null> {
@@ -115,7 +109,8 @@ async function serveStaticFile(
   staticRoot: string,
   routePath: string
 ): Promise<boolean> {
-  const filePath = normalize(join(staticRoot, routePath));
+  const relativePath = routePath.replace(/^\/+/, "");
+  const filePath = normalize(join(staticRoot, relativePath));
 
   if (!filePath.startsWith(staticRoot)) {
     sendJson(request, response, 403, { ok: false });
@@ -182,7 +177,8 @@ const server = createServer((request, response) => {
 
 async function handleRequest(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse): Promise<void> {
   if (request.method === "OPTIONS") {
-    sendJson(request, response, 204, {});
+    response.writeHead(204, baseHeaders(request));
+    response.end();
     return;
   }
 
@@ -203,8 +199,13 @@ async function handleRequest(request: import("node:http").IncomingMessage, respo
           requireHttps: productionRuntime
         })
       );
-    } catch {
-      sendConfigError(request, response);
+    } catch (error) {
+      console.error("Failed to create ChromeRemote session:", error instanceof Error ? error.message : "unknown error");
+      sendJson(request, response, 500, {
+        ok: false,
+        errorCode: "SESSION_CREATE_FAILED",
+        message: "ChromeRemote could not create a phone session."
+      });
     }
     return;
   }
@@ -242,4 +243,5 @@ if (!startupStaticRoot) {
 server.listen(port, host, () => {
   console.log(`ChromeRemote relay listening on ${host}:${port}`);
   console.log(`ChromeRemote mobile app served from ${startupStaticRoot}`);
+  console.log(`ChromeRemote public origin: ${publicOrigin}`);
 });
