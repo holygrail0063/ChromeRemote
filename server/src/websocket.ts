@@ -180,6 +180,15 @@ export function handleUpgrade(request: IncomingMessage, socket: Socket): void {
           context.role = message.role;
           context.authenticated = true;
           context.connection.send({ type: "AUTH_OK", role: message.role, expiresAt: new Date(auth.session.expiresAtMs).toISOString() });
+
+          // A Manifest V3 background service worker can reconnect independently of the phone.
+          // If the controller WebSocket is still authenticated, immediately restore the
+          // desktop-side connected state and restart player-state polling. Without this,
+          // the extension incorrectly waits for a phone reconnect that already happened.
+          if (message.role === "player" && auth.session.controller) {
+            context.connection.send({ type: "CONTROLLER_CONNECTED" });
+          }
+
           continue;
         }
 
