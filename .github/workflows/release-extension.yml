@@ -1,0 +1,61 @@
+name: Build ChromeRemote Extension Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "public/**"
+      - "scripts/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".env.production"
+      - ".github/workflows/release-extension.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package-extension:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build production extension
+        run: npm run build:extension:production
+
+      - name: Create unpacked extension ZIP
+        run: |
+          rm -f ChromeRemote-Extension.zip
+          cd dist
+          zip -r ../ChromeRemote-Extension.zip .
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v${VERSION}"
+          TITLE="ChromeRemote v${VERSION}"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" ChromeRemote-Extension.zip --clobber
+          else
+            gh release create "$TAG" ChromeRemote-Extension.zip \
+              --target "$GITHUB_SHA" \
+              --title "$TITLE" \
+              --notes "Ready-to-load ChromeRemote extension. Download ChromeRemote-Extension.zip, extract it, then open chrome://extensions, enable Developer mode, choose Load unpacked, and select the extracted folder."
+          fi
