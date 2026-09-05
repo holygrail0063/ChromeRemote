@@ -8,6 +8,8 @@ export type PlayerState = {
   muted: boolean;
   readyState: number;
   ended: boolean;
+  title?: string;
+  episode?: string;
 };
 
 export const unavailablePlayerState: PlayerState = {
