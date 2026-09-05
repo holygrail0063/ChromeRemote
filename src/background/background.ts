@@ -23,7 +23,15 @@ type StoredPairing = {
   pairedTabId: number;
 };
 
+type RestorableWindowState = "normal" | "maximized";
+
+type RemoteFullscreenState = {
+  windowId: number;
+  previousState: RestorableWindowState;
+};
+
 const storageKey = "chromeRemotePairing";
+const fullscreenStorageKey = "chromeRemoteFullscreenState";
 const stateIntervalMs = 1000;
 const reconnectDelaysMs = [1000, 2000, 5000, 10000, 30000];
 
@@ -81,6 +89,25 @@ async function loadPairing(): Promise<StoredPairing | null> {
   return candidate;
 }
 
+async function saveRemoteFullscreenState(state: RemoteFullscreenState | null): Promise<void> {
+  if (state) {
+    await chrome.storage.session.set({ [fullscreenStorageKey]: state });
+    return;
+  }
+
+  await chrome.storage.session.remove(fullscreenStorageKey);
+}
+
+async function loadRemoteFullscreenState(): Promise<RemoteFullscreenState | null> {
+  const result = await chrome.storage.session.get(fullscreenStorageKey);
+  const candidate = result[fullscreenStorageKey] as RemoteFullscreenState | undefined;
+  if (!candidate || typeof candidate.windowId !== "number" || (candidate.previousState !== "normal" && candidate.previousState !== "maximized")) {
+    return null;
+  }
+
+  return candidate;
+}
+
 function clearReconnectTimer(): void {
   if (reconnectTimer !== null) {
     clearTimeout(reconnectTimer);
@@ -126,6 +153,57 @@ async function getPairedTabWatchUrl(tabId: number): Promise<string | null> {
   }
 }
 
+async function readPlayerStateFromTab(tabId: number): Promise<PlayerResponse> {
+  try {
+    return await chrome.tabs.sendMessage<PlayerCommand, PlayerResponse>(tabId, { type: "GET_STATE" });
+  } catch {
+    return { ok: false, error: "ChromeRemote cannot reach the paired Netflix tab.", errorCode: "PLAYER_UNAVAILABLE" };
+  }
+}
+
+async function enterRemoteFullscreen(tabId: number): Promise<PlayerResponse> {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const chromeWindow = await chrome.windows.get(tab.windowId);
+
+    if (chromeWindow.state !== "fullscreen") {
+      const previousState: RestorableWindowState = chromeWindow.state === "maximized" ? "maximized" : "normal";
+      await saveRemoteFullscreenState({ windowId: tab.windowId, previousState });
+      await chrome.windows.update(tab.windowId, { state: "fullscreen", focused: true });
+    }
+
+    return await readPlayerStateFromTab(tabId);
+  } catch {
+    return {
+      ok: false,
+      error: "ChromeRemote could not enter fullscreen on the paired Chrome window.",
+      errorCode: "FULLSCREEN_UNAVAILABLE"
+    };
+  }
+}
+
+async function exitRemoteFullscreen(tabId: number): Promise<PlayerResponse> {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const chromeWindow = await chrome.windows.get(tab.windowId);
+    const savedState = await loadRemoteFullscreenState();
+
+    if (chromeWindow.state === "fullscreen") {
+      const restoreState: RestorableWindowState = savedState?.windowId === tab.windowId ? savedState.previousState : "maximized";
+      await chrome.windows.update(tab.windowId, { state: restoreState, focused: true });
+    }
+
+    await saveRemoteFullscreenState(null);
+    return await readPlayerStateFromTab(tabId);
+  } catch {
+    return {
+      ok: false,
+      error: "ChromeRemote could not exit fullscreen on the paired Chrome window.",
+      errorCode: "EXIT_FULLSCREEN_UNAVAILABLE"
+    };
+  }
+}
+
 async function sendCommandToPairedTab(command: PlayerCommand): Promise<PlayerResponse> {
   if (!storedPairing) {
     return { ok: false, error: "No active phone pairing.", errorCode: "PLAYER_UNAVAILABLE" };
@@ -134,6 +212,14 @@ async function sendCommandToPairedTab(command: PlayerCommand): Promise<PlayerRes
   const watchUrl = await getPairedTabWatchUrl(storedPairing.pairedTabId);
   if (!watchUrl) {
     return { ok: false, error: "Netflix is no longer available on the paired tab.", errorCode: "PLAYER_UNAVAILABLE" };
+  }
+
+  if (command.type === "FULLSCREEN") {
+    return await enterRemoteFullscreen(storedPairing.pairedTabId);
+  }
+
+  if (command.type === "EXIT_FULLSCREEN") {
+    return await exitRemoteFullscreen(storedPairing.pairedTabId);
   }
 
   try {
