@@ -61,6 +61,7 @@ function sessionFromUrl(): ControllerSession | null {
 export function App() {
   const [snapshot, setSnapshot] = useState<RemoteSnapshot>(emptySnapshot);
   const [localSeek, setLocalSeek] = useState<number | null>(null);
+  const [localVolume, setLocalVolume] = useState<number | null>(null);
   const [scannedSession, setScannedSession] = useState<ControllerSession | null>(null);
   const socketRef = useRef<RemoteSocket | null>(null);
   const urlSession = useMemo(sessionFromUrl, []);
@@ -68,7 +69,7 @@ export function App() {
   const player = snapshot.state;
   const disabled = snapshot.status !== "connected" || !player?.detected;
   const progress = localSeek ?? player?.currentTime ?? 0;
-  const volume = Math.round((player?.volume ?? 0) * 100);
+  const volume = localVolume ?? Math.round((player?.volume ?? 0) * 100);
   const playbackRate = player?.playbackRate ?? 1;
 
   useEffect(() => {
@@ -107,6 +108,17 @@ export function App() {
     runCommand({ type: "SEEK_TO", seconds });
   };
 
+  const commitVolume = (percent: number) => {
+    const nextVolume = Math.round(Math.min(Math.max(percent, 0), 100));
+    setLocalVolume(null);
+    runCommand({ type: "SET_VOLUME", volume: nextVolume / 100 });
+  };
+
+  const adjustVolume = (delta: number) => {
+    const baseVolume = localVolume ?? Math.round((player?.volume ?? 0) * 100);
+    commitVolume(baseVolume + delta);
+  };
+
   return (
     <main className="remote-shell">
       <header className="topbar">
@@ -120,25 +132,13 @@ export function App() {
         </span>
       </header>
 
-      <section className="readout" aria-live="polite">
-        <div className="connection-detail">{snapshot.message}</div>
-        <div className="time-row">
-          <strong>{formatTime(progress)}</strong>
-          <span>/</span>
-          <strong>{formatTime(player?.duration ?? 0)}</strong>
-        </div>
-        <input
-          type="range"
-          min="0"
-          max={Math.max(player?.duration ?? 0, 0)}
-          value={progress}
-          disabled={disabled || !player?.duration}
-          aria-label="Seek"
-          onChange={(event) => setLocalSeek(Number(event.currentTarget.value))}
-          onPointerUp={(event) => commitSeek(Number(event.currentTarget.value))}
-          onKeyUp={(event) => commitSeek(Number(event.currentTarget.value))}
-        />
-      </section>
+      {player?.title || player?.episode ? (
+        <section className="media-details" aria-label="Now playing">
+          <span>Now Playing</span>
+          {player?.title ? <strong>{player.title}</strong> : null}
+          {player?.episode ? <p>{player.episode}</p> : null}
+        </section>
+      ) : null}
 
       <section className="controls" aria-label="Playback controls">
         <button type="button" disabled={disabled} onClick={() => runCommand({ type: "SEEK_RELATIVE", seconds: -10 })}>
@@ -178,7 +178,7 @@ export function App() {
           <strong>{volume}%</strong>
         </div>
         <div className="volume-row">
-          <button type="button" disabled={disabled} aria-label="Volume down" onClick={() => runCommand({ type: "SET_VOLUME", volume: clampVolume((player?.volume ?? 0) - 0.1) })}>
+          <button type="button" disabled={disabled} aria-label="Volume down" onClick={() => adjustVolume(-10)}>
             -
           </button>
           <input
@@ -188,9 +188,11 @@ export function App() {
             value={volume}
             disabled={disabled}
             aria-label="Volume"
-            onChange={(event) => runCommand({ type: "SET_VOLUME", volume: Number(event.currentTarget.value) / 100 })}
+            onChange={(event) => setLocalVolume(Number(event.currentTarget.value))}
+            onPointerUp={(event) => commitVolume(Number(event.currentTarget.value))}
+            onKeyUp={(event) => commitVolume(Number(event.currentTarget.value))}
           />
-          <button type="button" disabled={disabled} aria-label="Volume up" onClick={() => runCommand({ type: "SET_VOLUME", volume: clampVolume((player?.volume ?? 0) + 0.1) })}>
+          <button type="button" disabled={disabled} aria-label="Volume up" onClick={() => adjustVolume(10)}>
             +
           </button>
         </div>
@@ -214,18 +216,39 @@ export function App() {
         </div>
       </section>
 
-      <footer className="state-grid">
-        <span>Playback</span>
-        <strong>{player?.playing ? "Playing" : "Paused"}</strong>
-        <span>Speed</span>
-        <strong>{formatPlaybackRate(playbackRate)}</strong>
-        <span>Muted</span>
-        <strong>{player?.muted ? "Yes" : "No"}</strong>
+      <footer className="state-grid" aria-label="Player status">
+        <div>
+          <span>Playback</span>
+          <strong>{player?.playing ? "Playing" : "Paused"}</strong>
+        </div>
+        <div>
+          <span>Speed</span>
+          <strong>{formatPlaybackRate(playbackRate)}</strong>
+        </div>
+        <div>
+          <span>Muted</span>
+          <strong>{player?.muted ? "Yes" : "No"}</strong>
+        </div>
       </footer>
 
-      <div className="chrome-status">
-        <span aria-hidden="true" /> {snapshot.message}
-      </div>
+      <section className="readout readout-bottom" aria-label="Playback position">
+        <div className="time-row">
+          <strong>{formatTime(progress)}</strong>
+          <span>/</span>
+          <strong>{formatTime(player?.duration ?? 0)}</strong>
+        </div>
+        <input
+          type="range"
+          min="0"
+          max={Math.max(player?.duration ?? 0, 0)}
+          value={progress}
+          disabled={disabled || !player?.duration}
+          aria-label="Seek"
+          onChange={(event) => setLocalSeek(Number(event.currentTarget.value))}
+          onPointerUp={(event) => commitSeek(Number(event.currentTarget.value))}
+          onKeyUp={(event) => commitSeek(Number(event.currentTarget.value))}
+        />
+      </section>
     </main>
   );
 }
