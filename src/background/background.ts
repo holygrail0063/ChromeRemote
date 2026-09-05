@@ -23,6 +23,13 @@ type StoredPairing = {
   pairedTabId: number;
 };
 
+type RestorableWindowState = "normal" | "maximized";
+
+type RemoteFullscreenState = {
+  windowId: number;
+  previousState: RestorableWindowState;
+};
+
 const storageKey = "chromeRemotePairing";
 const stateIntervalMs = 1000;
 const reconnectDelaysMs = [1000, 2000, 5000, 10000, 30000];
@@ -34,6 +41,7 @@ let reconnectTimer: number | null = null;
 let pollingTimer: number | null = null;
 let reconnectAttempt = 0;
 let disconnecting = false;
+let remoteFullscreenState: RemoteFullscreenState | null = null;
 
 chrome.runtime.onInstalled.addListener(() => {
   void chrome.action.setBadgeText({ text: "" });
@@ -126,6 +134,59 @@ async function getPairedTabWatchUrl(tabId: number): Promise<string | null> {
   }
 }
 
+async function readPlayerStateFromTab(tabId: number): Promise<PlayerResponse> {
+  try {
+    return await chrome.tabs.sendMessage<PlayerCommand, PlayerResponse>(tabId, { type: "GET_STATE" });
+  } catch {
+    return { ok: false, error: "ChromeRemote cannot reach the paired Netflix tab.", errorCode: "PLAYER_UNAVAILABLE" };
+  }
+}
+
+async function enterRemoteFullscreen(tabId: number): Promise<PlayerResponse> {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const chromeWindow = await chrome.windows.get(tab.windowId);
+
+    if (chromeWindow.state !== "fullscreen") {
+      const previousState: RestorableWindowState = chromeWindow.state === "maximized" ? "maximized" : "normal";
+      remoteFullscreenState = { windowId: tab.windowId, previousState };
+      await chrome.windows.update(tab.windowId, { state: "fullscreen", focused: true });
+    }
+
+    return await readPlayerStateFromTab(tabId);
+  } catch {
+    return {
+      ok: false,
+      error: "ChromeRemote could not enter fullscreen on the paired Chrome window.",
+      errorCode: "FULLSCREEN_UNAVAILABLE"
+    };
+  }
+}
+
+async function exitRemoteFullscreen(tabId: number): Promise<PlayerResponse> {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const chromeWindow = await chrome.windows.get(tab.windowId);
+
+    if (chromeWindow.state === "fullscreen") {
+      const restoreState: RestorableWindowState =
+        remoteFullscreenState?.windowId === tab.windowId ? remoteFullscreenState.previousState : "maximized";
+      await chrome.windows.update(tab.windowId, { state: restoreState, focused: true });
+      remoteFullscreenState = null;
+      return await readPlayerStateFromTab(tabId);
+    }
+
+    remoteFullscreenState = null;
+    return await chrome.tabs.sendMessage<PlayerCommand, PlayerResponse>(tabId, { type: "EXIT_FULLSCREEN" });
+  } catch {
+    return {
+      ok: false,
+      error: "ChromeRemote could not exit fullscreen on the paired Chrome window.",
+      errorCode: "EXIT_FULLSCREEN_UNAVAILABLE"
+    };
+  }
+}
+
 async function sendCommandToPairedTab(command: PlayerCommand): Promise<PlayerResponse> {
   if (!storedPairing) {
     return { ok: false, error: "No active phone pairing.", errorCode: "PLAYER_UNAVAILABLE" };
@@ -134,6 +195,14 @@ async function sendCommandToPairedTab(command: PlayerCommand): Promise<PlayerRes
   const watchUrl = await getPairedTabWatchUrl(storedPairing.pairedTabId);
   if (!watchUrl) {
     return { ok: false, error: "Netflix is no longer available on the paired tab.", errorCode: "PLAYER_UNAVAILABLE" };
+  }
+
+  if (command.type === "FULLSCREEN") {
+    return await enterRemoteFullscreen(storedPairing.pairedTabId);
+  }
+
+  if (command.type === "EXIT_FULLSCREEN") {
+    return await exitRemoteFullscreen(storedPairing.pairedTabId);
   }
 
   try {
@@ -303,6 +372,7 @@ async function cleanup(invalidateServer: boolean): Promise<void> {
   stopPolling();
   socket?.close();
   socket = null;
+  remoteFullscreenState = null;
 
   const sessionId = storedPairing?.sessionId;
   await savePairing(null);
