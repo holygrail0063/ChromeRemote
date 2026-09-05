@@ -19,6 +19,7 @@ const staticCandidates = [
   resolve(process.cwd(), "remote", "dist"),
   resolve(serverSourceDir, "../../../..", "remote", "dist")
 ];
+const spaRoutes = new Set(["/", "/remote_session"]);
 
 const contentTypes: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
@@ -107,19 +108,12 @@ async function getStaticRoot(): Promise<string | null> {
   return null;
 }
 
-async function serveStatic(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse): Promise<boolean> {
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    return false;
-  }
-
-  const staticRoot = await getStaticRoot();
-  if (!staticRoot) {
-    return false;
-  }
-
-  const requestUrl = new URL(request.url ?? "/", publicOrigin);
-  const pathname = decodeURIComponent(requestUrl.pathname);
-  const routePath = pathname === "/" || pathname === "/remote_session" || pathname.startsWith("/r/") ? "/index.html" : pathname;
+async function serveStaticFile(
+  request: import("node:http").IncomingMessage,
+  response: import("node:http").ServerResponse,
+  staticRoot: string,
+  routePath: string
+): Promise<boolean> {
   const filePath = normalize(join(staticRoot, routePath));
 
   if (!filePath.startsWith(staticRoot)) {
@@ -149,6 +143,36 @@ async function serveStatic(request: import("node:http").IncomingMessage, respons
   } catch {
     return false;
   }
+}
+
+async function serveSpaApp(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse): Promise<boolean> {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return false;
+  }
+
+  const requestUrl = new URL(request.url ?? "/", publicOrigin);
+  const pathname = decodeURIComponent(requestUrl.pathname);
+  if (!spaRoutes.has(pathname) && !pathname.startsWith("/r/")) {
+    return false;
+  }
+
+  const staticRoot = await getStaticRoot();
+  return staticRoot ? serveStaticFile(request, response, staticRoot, "index.html") : false;
+}
+
+async function serveStatic(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse): Promise<boolean> {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return false;
+  }
+
+  const staticRoot = await getStaticRoot();
+  if (!staticRoot) {
+    return false;
+  }
+
+  const requestUrl = new URL(request.url ?? "/", publicOrigin);
+  const pathname = decodeURIComponent(requestUrl.pathname);
+  return serveStaticFile(request, response, staticRoot, pathname);
 }
 
 const server = createServer((request, response) => {
@@ -187,6 +211,15 @@ async function handleRequest(request: import("node:http").IncomingMessage, respo
   const deleteMatch = request.url?.match(/^\/api\/sessions\/([^/]+)$/);
   if (request.method === "DELETE" && deleteMatch) {
     sendJson(request, response, invalidateSession(decodeURIComponent(deleteMatch[1])) ? 200 : 404, { ok: true });
+    return;
+  }
+
+  if (request.url?.startsWith("/api/")) {
+    sendJson(request, response, 404, { ok: false });
+    return;
+  }
+
+  if (await serveSpaApp(request, response)) {
     return;
   }
 

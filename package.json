@@ -8,7 +8,7 @@
     "build": "npm run build:extension && npm run build:server && npm run build:remote",
     "build:extension": "tsc --noEmit && node scripts/build-extension.mjs",
     "build:extension:production": "npm run build:extension && node scripts/verify-production-build.mjs",
-    "build:railway": "npm run build:server && npm run build:remote",
+    "build:railway": "npm run build:server && npm run build:remote && node scripts/verify-railway-build.mjs",
     "build:server": "tsc -p server/tsconfig.json",
     "build:remote": "tsc -p remote/tsconfig.json && vite build remote --outDir dist",
     "typecheck": "tsc --noEmit",
