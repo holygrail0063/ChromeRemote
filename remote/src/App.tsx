@@ -72,6 +72,7 @@ export function App() {
   const [localSeek, setLocalSeek] = useState<number | null>(null);
   const [localVolume, setLocalVolume] = useState<number | null>(null);
   const [scannedSession, setScannedSession] = useState<ControllerSession | null>(null);
+  const [showConnectionMenu, setShowConnectionMenu] = useState(false);
   const socketRef = useRef<RemoteSocket | null>(null);
   const urlSession = useMemo(sessionFromUrl, []);
   const session = scannedSession ?? urlSession;
@@ -137,6 +138,13 @@ export function App() {
     commitVolume(baseVolume + delta);
   };
 
+  const disconnectFromChrome = () => {
+    setShowConnectionMenu(false);
+    socketRef.current?.endSession();
+    clearControllerSession();
+    window.setTimeout(() => window.location.replace("/remote_session"), 150);
+  };
+
   return (
     <main className="remote-shell">
       <header className="topbar">
@@ -144,10 +152,32 @@ export function App() {
           <h1>ChromeRemote</h1>
           <p>Netflix Player</p>
         </div>
-        <span className={`status-pill status-${snapshot.status}`}>
-          <span aria-hidden="true" />
-          {snapshot.status === "connected" ? "Connected" : "Connecting"}
-        </span>
+        <div className="connection-status">
+          {snapshot.status === "connected" ? (
+            <>
+              <button
+                type="button"
+                className={`status-pill status-${snapshot.status}`}
+                aria-expanded={showConnectionMenu}
+                aria-haspopup="menu"
+                onClick={() => setShowConnectionMenu((open) => !open)}
+              >
+                <span aria-hidden="true" /> Connected
+              </button>
+              {showConnectionMenu ? (
+                <div className="connection-menu" role="menu">
+                  <button type="button" role="menuitem" onClick={disconnectFromChrome}>
+                    Disconnect from Chrome
+                  </button>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <span className={`status-pill status-${snapshot.status}`}>
+              <span aria-hidden="true" /> Connecting
+            </span>
+          )}
+        </div>
       </header>
 
       {player?.title || player?.episode ? (
@@ -199,39 +229,6 @@ export function App() {
         </div>
       </section>
 
-      <section className="speed-panel" aria-label="Playback speed controls">
-        <div className="speed-header">Playback Speed</div>
-        <div className="speed-options">
-          {PLAYBACK_RATES.map((rate) => (
-            <button
-              key={rate}
-              type="button"
-              className={Math.abs(playbackRate - rate) < 0.01 ? "selected-speed" : undefined}
-              disabled={disabled}
-              aria-pressed={Math.abs(playbackRate - rate) < 0.01}
-              onClick={() => runCommand({ type: "SET_PLAYBACK_RATE", rate: rate as PlaybackRate })}
-            >
-              {formatPlaybackRate(rate)}
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <footer className="state-grid" aria-label="Player status">
-        <div>
-          <span>Playback</span>
-          <strong>{player?.playing ? "Playing" : "Paused"}</strong>
-        </div>
-        <div>
-          <span>Speed</span>
-          <strong>{formatPlaybackRate(playbackRate)}</strong>
-        </div>
-        <div>
-          <span>Muted</span>
-          <strong>{player?.muted ? "Yes" : "No"}</strong>
-        </div>
-      </footer>
-
       <section className="readout readout-bottom" aria-label="Playback position">
         <div className="time-row">
           <strong>{formatTime(progress)}</strong>
@@ -267,6 +264,39 @@ export function App() {
           +10
         </button>
       </section>
+
+      <section className="speed-panel" aria-label="Playback speed controls">
+        <div className="speed-header">Playback Speed</div>
+        <div className="speed-options">
+          {PLAYBACK_RATES.map((rate) => (
+            <button
+              key={rate}
+              type="button"
+              className={Math.abs(playbackRate - rate) < 0.01 ? "selected-speed" : undefined}
+              disabled={disabled}
+              aria-pressed={Math.abs(playbackRate - rate) < 0.01}
+              onClick={() => runCommand({ type: "SET_PLAYBACK_RATE", rate: rate as PlaybackRate })}
+            >
+              {formatPlaybackRate(rate)}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <footer className="state-grid" aria-label="Player status">
+        <div>
+          <span>Playback</span>
+          <strong>{player?.playing ? "Playing" : "Paused"}</strong>
+        </div>
+        <div>
+          <span>Speed</span>
+          <strong>{formatPlaybackRate(playbackRate)}</strong>
+        </div>
+        <div>
+          <span>Muted</span>
+          <strong>{player?.muted ? "Yes" : "No"}</strong>
+        </div>
+      </footer>
     </main>
   );
 }
