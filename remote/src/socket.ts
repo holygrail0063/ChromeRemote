@@ -66,6 +66,15 @@ export class RemoteSocket {
     this.socket?.close();
   }
 
+  endSession(): void {
+    this.manuallyClosed = true;
+    if (this.reconnectTimer !== null) {
+      window.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.sendRaw({ type: "END_SESSION" });
+  }
+
   command(command: PlayerCommand): Promise<boolean> {
     const requestId = crypto.randomUUID();
     this.sendRaw({ type: "COMMAND", requestId, command });
