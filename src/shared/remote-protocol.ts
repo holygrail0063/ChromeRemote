@@ -22,6 +22,7 @@ export type RemoteClientMessage =
   | { type: "PLAYER_STATE"; state: PlayerState }
   | { type: "COMMAND_RESULT"; requestId: string; ok: true; state?: PlayerState }
   | { type: "COMMAND_RESULT"; requestId: string; ok: false; errorCode: RemoteErrorCode; message: string; state?: PlayerState }
+  | { type: "END_SESSION" }
   | { type: "PING" };
 
 export type RemoteServerMessage =
@@ -109,7 +110,7 @@ export function isRemoteClientMessage(message: unknown): message is RemoteClient
     return typeof candidate.errorCode === "string" && typeof candidate.message === "string";
   }
 
-  return candidate.type === "PING";
+  return candidate.type === "END_SESSION" || candidate.type === "PING";
 }
 
 export function toRemoteErrorCode(errorCode?: string): RemoteErrorCode {
