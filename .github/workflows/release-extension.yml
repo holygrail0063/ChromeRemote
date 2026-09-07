@@ -41,7 +41,7 @@ jobs:
       - name: Add installation instructions
         run: |
           cat > dist/INSTALL.txt <<'EOF'
-          ChromeRemote v1.7.1 - Installation & Use
+          ChromeRemote v1.7.2 - Installation & Use
           =========================================
 
           INSTALL ON YOUR COMPUTER
@@ -75,15 +75,20 @@ jobs:
           - Volume controls
           - Playback speeds: 0.5x, 0.75x, 1x, 1.25x, 1.5x
 
+          NETFLIX CONTROLS
+          - Next Episode now uses Netflix's active player-session command first, with the visible Netflix button as a fallback.
+          - Netflix fullscreen falls back to the actual video element filling the browser viewport when native fullscreen is blocked by Chrome.
+          - Exit Fullscreen removes that player-only fullscreen state and restores the normal Netflix page.
+          - Netflix's M7375-safe seek implementation is unchanged.
+
           FULLSCREEN
           - Fullscreen targets the Netflix or YouTube video player, not Chrome's F11-style browser window fullscreen.
           - ChromeRemote first uses the site's native player fullscreen control when Chrome permits it.
           - If Chrome blocks native fullscreen because the command came from the phone rather than a local click, ChromeRemote expands only the player to fill the browser viewport.
-          - v1.7.1 strengthens YouTube's player-only fallback so page layout containers cannot trap the player inside a smaller area.
           - Exit Fullscreen returns the player to its normal page layout.
 
           YOUTUBE AUDIO
-          - Mute / Unmute now uses YouTube's own player API instead of only changing the raw video element.
+          - Mute / Unmute uses YouTube's own player API instead of only changing the raw video element.
           - YouTube's native mute button is used as a fallback if the player API is unavailable.
           - Volume state is read from YouTube's player API when available.
 
@@ -126,5 +131,5 @@ jobs:
             gh release create "$TAG" ChromeRemote-Extension.zip \
               --target "$GITHUB_SHA" \
               --title "$TITLE" \
-              --notes "ChromeRemote v1.7.1 fixes YouTube Mute / Unmute by using YouTube's own player API with a native mute-button fallback, and strengthens the YouTube player-only fullscreen fallback. Netflix playback and M7375-safe seeking remain unchanged."
+              --notes "ChromeRemote v1.7.2 fixes Netflix Next Episode and Netflix player Fullscreen / Exit Fullscreen. Next Episode now uses Netflix's active player-session command first, with DOM controls as fallback. Netflix player-only fullscreen now targets the video element directly when Chrome blocks native fullscreen. M7375-safe seeking and YouTube controls remain unchanged."
           fi

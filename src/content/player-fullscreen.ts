@@ -50,6 +50,10 @@ function ensureFullscreenStyle(): void {
       isolation: isolate !important;
     }
 
+    video.${PLAYER_FULLSCREEN_CLASS} {
+      object-fit: contain !important;
+    }
+
     .${PLAYER_FULLSCREEN_CLASS} video,
     .${PLAYER_FULLSCREEN_CLASS} .html5-main-video {
       position: absolute !important;
@@ -106,15 +110,7 @@ function getYouTubePlayerRoot(): HTMLElement | null {
 }
 
 function getNetflixPlayerRoot(): HTMLElement | null {
-  const video = document.querySelector<HTMLVideoElement>("video");
-  return (
-    document.querySelector<HTMLElement>('[data-uia="player"], .watch-video, .watch-video--player-view') ??
-    video?.closest<HTMLElement>('[data-uia*="player" i], [class*="player" i]') ??
-    video?.parentElement?.parentElement ??
-    video?.parentElement ??
-    video ??
-    null
-  );
+  return document.querySelector<HTMLVideoElement>("video");
 }
 
 async function tryNativeFullscreen(element: HTMLElement, control?: HTMLElement | null): Promise<boolean> {
