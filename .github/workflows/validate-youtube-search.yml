@@ -6,6 +6,7 @@ on:
       - feature/youtube-search
     paths:
       - ".github/workflows/validate-youtube-search.yml"
+      - "tests/**"
 
 permissions:
   contents: write
