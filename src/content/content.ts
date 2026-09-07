@@ -22,6 +22,18 @@ function getSeekTargetSeconds(command: Extract<PlayerCommand, { type: "SEEK_RELA
   return clampSeekSeconds(state.currentTime + command.seconds, state.duration);
 }
 
+function searchYouTube(query: string): void {
+  if (!isYouTubePage()) {
+    throw new Error("YouTube search is only available on a paired YouTube tab.");
+  }
+
+  const trimmedQuery = query.trim();
+  const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(trimmedQuery)}`;
+
+  // Let the command response reach the phone before navigation replaces the page.
+  window.setTimeout(() => window.location.assign(searchUrl), 50);
+}
+
 async function handleCommand(command: PlayerCommand): Promise<PlayerResponse> {
   try {
     switch (command.type) {
@@ -68,6 +80,9 @@ async function handleCommand(command: PlayerCommand): Promise<PlayerResponse> {
         break;
       case "TOGGLE_MUTE":
         player.toggleMute();
+        break;
+      case "SEARCH_YOUTUBE":
+        searchYouTube(command.query);
         break;
     }
 
