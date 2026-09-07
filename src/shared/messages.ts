@@ -11,11 +11,13 @@ export type PlayerCommand =
   | { type: "NEXT_EPISODE" }
   | { type: "FULLSCREEN" }
   | { type: "EXIT_FULLSCREEN" }
-  | { type: "TOGGLE_MUTE" };
+  | { type: "TOGGLE_MUTE" }
+  | { type: "SEARCH_YOUTUBE"; query: string };
 
 export type PlaybackRate = 0.5 | 0.75 | 1 | 1.25 | 1.5;
 
 export const PLAYBACK_RATES: readonly PlaybackRate[] = [0.5, 0.75, 1, 1.25, 1.5];
+export const MAX_YOUTUBE_SEARCH_LENGTH = 200;
 
 export type PlayerResponse =
   | { ok: true; state: PlayerState }
@@ -32,7 +34,8 @@ export const PLAYER_COMMAND_TYPES = new Set<PlayerCommand["type"]>([
   "NEXT_EPISODE",
   "FULLSCREEN",
   "EXIT_FULLSCREEN",
-  "TOGGLE_MUTE"
+  "TOGGLE_MUTE",
+  "SEARCH_YOUTUBE"
 ]);
 
 export function isPlayerCommand(message: unknown): message is PlayerCommand {
@@ -55,6 +58,14 @@ export function isPlayerCommand(message: unknown): message is PlayerCommand {
 
   if (candidate.type === "SET_PLAYBACK_RATE") {
     return typeof candidate.rate === "number" && PLAYBACK_RATES.includes(candidate.rate as PlaybackRate);
+  }
+
+  if (candidate.type === "SEARCH_YOUTUBE") {
+    return (
+      typeof candidate.query === "string" &&
+      candidate.query.trim().length > 0 &&
+      candidate.query.trim().length <= MAX_YOUTUBE_SEARCH_LENGTH
+    );
   }
 
   return true;
