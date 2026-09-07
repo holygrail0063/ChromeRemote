@@ -91,12 +91,12 @@ export class NetflixPlayer {
   }
 
   getState(): PlayerState {
+    const platform = getPlatform();
     const video = this.getVideo();
     if (!video) {
-      return unavailablePlayerState;
+      return { ...unavailablePlayerState, platform };
     }
 
-    const platform = getPlatform();
     return {
       detected: true,
       playing: !video.paused && !video.ended,
