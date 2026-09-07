@@ -64,7 +64,13 @@ await mkdir(resolve(distDir, "assets"), { recursive: true });
 
 const manifestPath = resolve(distDir, "manifest.json");
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-manifest.host_permissions = ["https://www.netflix.com/*", relayHostPermission()];
+manifest.host_permissions = [
+  "https://www.netflix.com/*",
+  "https://www.youtube.com/*",
+  "https://youtube.com/*",
+  "https://m.youtube.com/*",
+  relayHostPermission()
+];
 await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
 for (const entry of [
