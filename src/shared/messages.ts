@@ -12,7 +12,10 @@ export type PlayerCommand =
   | { type: "FULLSCREEN" }
   | { type: "EXIT_FULLSCREEN" }
   | { type: "TOGGLE_MUTE" }
-  | { type: "SEARCH_YOUTUBE"; query: string };
+  | { type: "SEARCH_YOUTUBE"; query: string }
+  | { type: "YOUTUBE_PREVIOUS_RESULT" }
+  | { type: "YOUTUBE_NEXT_RESULT" }
+  | { type: "YOUTUBE_OPEN_SELECTED_RESULT" };
 
 export type PlaybackRate = 0.5 | 0.75 | 1 | 1.25 | 1.5;
 
@@ -35,7 +38,10 @@ export const PLAYER_COMMAND_TYPES = new Set<PlayerCommand["type"]>([
   "FULLSCREEN",
   "EXIT_FULLSCREEN",
   "TOGGLE_MUTE",
-  "SEARCH_YOUTUBE"
+  "SEARCH_YOUTUBE",
+  "YOUTUBE_PREVIOUS_RESULT",
+  "YOUTUBE_NEXT_RESULT",
+  "YOUTUBE_OPEN_SELECTED_RESULT"
 ]);
 
 export function isPlayerCommand(message: unknown): message is PlayerCommand {
