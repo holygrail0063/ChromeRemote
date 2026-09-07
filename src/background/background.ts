@@ -1,6 +1,7 @@
 import { REMOTE_HTTP_ORIGIN, REMOTE_WS_ORIGIN } from "../shared/remote-config";
-import { getNetflixPageContext } from "../shared/netflix-url";
+import { getNetflixPageContext, type SupportedPlayerSite } from "../shared/netflix-url";
 import type { PlayerCommand, PlayerResponse } from "../shared/messages";
+import { unavailablePlayerState, type PlayerState } from "../shared/player-state";
 import {
   encodePairingPayload,
   isCreateRemoteSessionResponse,
@@ -20,20 +21,18 @@ type StoredPairing = {
   remoteUrl: string;
   pairingPayload: string;
   expiresAt: string;
-  pairedTabId: number;
 };
 
-type RestorableWindowState = "normal" | "maximized";
-
-type RemoteFullscreenState = {
-  windowId: number;
-  previousState: RestorableWindowState;
+type ActiveSupportedTab = {
+  tab: chrome.tabs.Tab;
+  tabId: number;
+  site: SupportedPlayerSite;
 };
 
 const storageKey = "chromeRemotePairing";
-const fullscreenStorageKey = "chromeRemoteFullscreenState";
-const stateIntervalMs = 1000;
+const stateIntervalMs = 750;
 const reconnectDelaysMs = [1000, 2000, 5000, 10000, 30000];
+const contentMessageRetryDelaysMs = [0, 125, 300, 600];
 
 let pairingState: PairingState = { status: "not-paired" };
 let storedPairing: StoredPairing | null = null;
@@ -42,10 +41,15 @@ let reconnectTimer: number | null = null;
 let pollingTimer: number | null = null;
 let reconnectAttempt = 0;
 let disconnecting = false;
+let lastActiveSupportedTabId: number | null = null;
 
 chrome.runtime.onInstalled.addListener(() => {
   void chrome.action.setBadgeText({ text: "" });
 });
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
 
 function setPairingState(nextState: PairingState): void {
   pairingState = nextState;
@@ -63,6 +67,17 @@ function pairingError(errorCode: PairingErrorCode, error: string, state: Pairing
   return { ok: false, state: { ...state, errorCode, error }, errorCode, error };
 }
 
+function sessionState(status: PairingState["status"], pairing: StoredPairing, activeTabId?: number): PairingState {
+  return {
+    status,
+    sessionId: pairing.sessionId,
+    remoteUrl: pairing.remoteUrl,
+    pairingPayload: pairing.pairingPayload,
+    expiresAt: pairing.expiresAt,
+    activeTabId
+  };
+}
+
 async function savePairing(pairing: StoredPairing | null): Promise<void> {
   storedPairing = pairing;
   if (pairing) {
@@ -75,37 +90,27 @@ async function savePairing(pairing: StoredPairing | null): Promise<void> {
 
 async function loadPairing(): Promise<StoredPairing | null> {
   const result = await chrome.storage.session.get(storageKey);
-  const candidate = result[storageKey] as StoredPairing | undefined;
-  if (!candidate || Date.parse(candidate.expiresAt) <= Date.now()) {
+  const candidate = result[storageKey] as Partial<StoredPairing> | undefined;
+  if (
+    !candidate ||
+    typeof candidate.sessionId !== "string" ||
+    typeof candidate.playerToken !== "string" ||
+    typeof candidate.remoteUrl !== "string" ||
+    typeof candidate.pairingPayload !== "string" ||
+    typeof candidate.expiresAt !== "string" ||
+    Date.parse(candidate.expiresAt) <= Date.now()
+  ) {
     await savePairing(null);
     return null;
   }
 
-  if (!candidate.pairingPayload) {
-    await savePairing(null);
-    return null;
-  }
-
-  return candidate;
-}
-
-async function saveRemoteFullscreenState(state: RemoteFullscreenState | null): Promise<void> {
-  if (state) {
-    await chrome.storage.session.set({ [fullscreenStorageKey]: state });
-    return;
-  }
-
-  await chrome.storage.session.remove(fullscreenStorageKey);
-}
-
-async function loadRemoteFullscreenState(): Promise<RemoteFullscreenState | null> {
-  const result = await chrome.storage.session.get(fullscreenStorageKey);
-  const candidate = result[fullscreenStorageKey] as RemoteFullscreenState | undefined;
-  if (!candidate || typeof candidate.windowId !== "number" || (candidate.previousState !== "normal" && candidate.previousState !== "maximized")) {
-    return null;
-  }
-
-  return candidate;
+  return {
+    sessionId: candidate.sessionId,
+    playerToken: candidate.playerToken,
+    remoteUrl: candidate.remoteUrl,
+    pairingPayload: candidate.pairingPayload,
+    expiresAt: candidate.expiresAt
+  };
 }
 
 function clearReconnectTimer(): void {
@@ -122,110 +127,104 @@ function stopPolling(): void {
   }
 }
 
-function scheduleReconnect(): void {
-  if (!storedPairing || disconnecting || reconnectTimer !== null) {
-    return;
+function sendSocketMessage(message: unknown): void {
+  if (socket?.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify(message));
   }
-
-  const delay = reconnectDelaysMs[Math.min(reconnectAttempt, reconnectDelaysMs.length - 1)];
-  reconnectAttempt += 1;
-  setPairingState({
-    status: "temporarily-disconnected",
-    sessionId: storedPairing.sessionId,
-    remoteUrl: storedPairing.remoteUrl,
-    pairingPayload: storedPairing.pairingPayload,
-    expiresAt: storedPairing.expiresAt,
-    pairedTabId: storedPairing.pairedTabId
-  });
-
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    connectSocket(storedPairing);
-  }, delay) as unknown as number;
 }
 
-async function getPairedTabWatchUrl(tabId: number): Promise<string | null> {
+async function getActiveSupportedTab(): Promise<ActiveSupportedTab | null> {
   try {
-    const tab = await chrome.tabs.get(tabId);
-    return getNetflixPageContext(tab.url).isWatchPage ? (tab.url ?? null) : null;
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (!tab?.id) {
+      return null;
+    }
+
+    const context = getNetflixPageContext(tab.url);
+    if (!context.isSupportedSite || !context.site) {
+      return null;
+    }
+
+    return { tab, tabId: tab.id, site: context.site };
   } catch {
     return null;
   }
 }
 
-async function readPlayerStateFromTab(tabId: number): Promise<PlayerResponse> {
-  try {
-    return await chrome.tabs.sendMessage<PlayerCommand, PlayerResponse>(tabId, { type: "GET_STATE" });
-  } catch {
-    return { ok: false, error: "ChromeRemote cannot reach the paired Netflix tab.", errorCode: "PLAYER_UNAVAILABLE" };
-  }
+function unavailableState(site?: SupportedPlayerSite): PlayerState {
+  return site ? { ...unavailablePlayerState, platform: site } : { ...unavailablePlayerState };
 }
 
-async function enterRemoteFullscreen(tabId: number): Promise<PlayerResponse> {
-  try {
-    const tab = await chrome.tabs.get(tabId);
-    const chromeWindow = await chrome.windows.get(tab.windowId);
+async function sendTabMessage(tabId: number, command: PlayerCommand): Promise<PlayerResponse> {
+  let lastError: unknown;
 
-    if (chromeWindow.state !== "fullscreen") {
-      const previousState: RestorableWindowState = chromeWindow.state === "maximized" ? "maximized" : "normal";
-      await saveRemoteFullscreenState({ windowId: tab.windowId, previousState });
-      await chrome.windows.update(tab.windowId, { state: "fullscreen", focused: true });
+  for (const retryDelay of contentMessageRetryDelaysMs) {
+    if (retryDelay > 0) {
+      await delay(retryDelay);
     }
 
-    return await readPlayerStateFromTab(tabId);
-  } catch {
-    return {
-      ok: false,
-      error: "ChromeRemote could not enter fullscreen on the paired Chrome window.",
-      errorCode: "FULLSCREEN_UNAVAILABLE"
-    };
+    try {
+      return await chrome.tabs.sendMessage<PlayerCommand, PlayerResponse>(tabId, command);
+    } catch (error) {
+      lastError = error;
+    }
   }
+
+  throw lastError instanceof Error ? lastError : new Error("ChromeRemote could not reach the active player tab.");
 }
 
-async function exitRemoteFullscreen(tabId: number): Promise<PlayerResponse> {
-  try {
-    const tab = await chrome.tabs.get(tabId);
-    const chromeWindow = await chrome.windows.get(tab.windowId);
-    const savedState = await loadRemoteFullscreenState();
+async function readActivePlayerState(): Promise<{ state: PlayerState; activeTabId?: number }> {
+  const active = await getActiveSupportedTab();
+  if (!active) {
+    return { state: unavailableState() };
+  }
 
-    if (chromeWindow.state === "fullscreen") {
-      const restoreState: RestorableWindowState = savedState?.windowId === tab.windowId ? savedState.previousState : "maximized";
-      await chrome.windows.update(tab.windowId, { state: restoreState, focused: true });
+  try {
+    const response = await sendTabMessage(active.tabId, { type: "GET_STATE" });
+    if (response.ok) {
+      return { state: response.state, activeTabId: active.tabId };
     }
 
-    await saveRemoteFullscreenState(null);
-    return await readPlayerStateFromTab(tabId);
+    if (response.state) {
+      return { state: response.state, activeTabId: active.tabId };
+    }
   } catch {
-    return {
-      ok: false,
-      error: "ChromeRemote could not exit fullscreen on the paired Chrome window.",
-      errorCode: "EXIT_FULLSCREEN_UNAVAILABLE"
-    };
+    // A newly activated Netflix/YouTube tab can take a moment to receive its content script.
+    // Keep the phone session connected and report a loading state while retries continue.
   }
+
+  return { state: unavailableState(active.site), activeTabId: active.tabId };
 }
 
-async function sendCommandToPairedTab(command: PlayerCommand): Promise<PlayerResponse> {
+async function sendCommandToActiveTab(command: PlayerCommand): Promise<PlayerResponse> {
   if (!storedPairing) {
     return { ok: false, error: "No active phone pairing.", errorCode: "PLAYER_UNAVAILABLE" };
   }
 
-  const watchUrl = await getPairedTabWatchUrl(storedPairing.pairedTabId);
-  if (!watchUrl) {
-    return { ok: false, error: "Netflix is no longer available on the paired tab.", errorCode: "PLAYER_UNAVAILABLE" };
+  if (command.type === "GET_STATE") {
+    const { state } = await readActivePlayerState();
+    return { ok: true, state };
   }
 
-  if (command.type === "FULLSCREEN") {
-    return await enterRemoteFullscreen(storedPairing.pairedTabId);
-  }
-
-  if (command.type === "EXIT_FULLSCREEN") {
-    return await exitRemoteFullscreen(storedPairing.pairedTabId);
+  const active = await getActiveSupportedTab();
+  if (!active) {
+    return {
+      ok: false,
+      error: "Switch Chrome to a Netflix or YouTube tab to use the remote.",
+      errorCode: "PLAYER_UNAVAILABLE",
+      state: unavailableState()
+    };
   }
 
   try {
-    return await chrome.tabs.sendMessage<PlayerCommand, PlayerResponse>(storedPairing.pairedTabId, command);
+    return await sendTabMessage(active.tabId, command);
   } catch {
-    return { ok: false, error: "ChromeRemote cannot reach the paired Netflix tab.", errorCode: "PLAYER_UNAVAILABLE" };
+    return {
+      ok: false,
+      error: `ChromeRemote is waiting for the active ${active.site === "youtube" ? "YouTube" : "Netflix"} tab to finish loading.`,
+      errorCode: "PLAYER_UNAVAILABLE",
+      state: unavailableState(active.site)
+    };
   }
 }
 
@@ -234,22 +233,14 @@ async function pushPlayerState(): Promise<void> {
     return;
   }
 
-  const response = await sendCommandToPairedTab({ type: "GET_STATE" });
-  if (response.ok && response.state) {
-    socket.send(JSON.stringify({ type: "PLAYER_STATE", state: response.state }));
-    return;
-  }
+  const { state, activeTabId } = await readActivePlayerState();
+  sendSocketMessage({ type: "PLAYER_STATE", state });
 
-  if (!response.ok) {
-    socket.send(
-      JSON.stringify({
-        type: "COMMAND_RESULT",
-        requestId: `state-${Date.now()}`,
-        ok: false,
-        errorCode: "PLAYER_UNAVAILABLE",
-        message: response.error
-      })
-    );
+  if (storedPairing && pairingState.status !== "not-paired" && pairingState.status !== "expired") {
+    const nextState = { ...pairingState, activeTabId };
+    if (pairingState.activeTabId !== activeTabId) {
+      setPairingState(nextState);
+    }
   }
 }
 
@@ -264,10 +255,66 @@ function startPolling(): void {
   }, stateIntervalMs) as unknown as number;
 }
 
-function sendSocketMessage(message: unknown): void {
-  if (socket?.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify(message));
+async function exitViewportFullscreenOnTab(tabId: number): Promise<void> {
+  try {
+    await chrome.tabs.sendMessage<PlayerCommand, PlayerResponse>(tabId, { type: "EXIT_PLAYER_FULLSCREEN" });
+  } catch {
+    // The previous tab may have navigated or closed; cleanup is best-effort.
   }
+}
+
+async function handleActiveTabChanged(): Promise<void> {
+  const active = await getActiveSupportedTab();
+  const nextTabId = active?.tabId ?? null;
+
+  if (lastActiveSupportedTabId !== null && lastActiveSupportedTabId !== nextTabId) {
+    await exitViewportFullscreenOnTab(lastActiveSupportedTabId);
+  }
+
+  lastActiveSupportedTabId = nextTabId;
+  await pushPlayerState();
+}
+
+chrome.tabs.onActivated.addListener(() => {
+  void handleActiveTabChanged();
+});
+
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+  if (!tab.active) {
+    return;
+  }
+
+  if (changeInfo.url !== undefined || changeInfo.status === "complete") {
+    void handleActiveTabChanged();
+  }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (lastActiveSupportedTabId === tabId) {
+    lastActiveSupportedTabId = null;
+    void pushPlayerState();
+  }
+});
+
+chrome.windows.onFocusChanged.addListener((windowId) => {
+  if (windowId !== chrome.windows.WINDOW_ID_NONE) {
+    void handleActiveTabChanged();
+  }
+});
+
+function scheduleReconnect(): void {
+  if (!storedPairing || disconnecting || reconnectTimer !== null) {
+    return;
+  }
+
+  const reconnectDelay = reconnectDelaysMs[Math.min(reconnectAttempt, reconnectDelaysMs.length - 1)];
+  reconnectAttempt += 1;
+  setPairingState(sessionState("temporarily-disconnected", storedPairing, pairingState.activeTabId));
+
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectSocket(storedPairing);
+  }, reconnectDelay) as unknown as number;
 }
 
 function handleServerMessage(message: RemoteServerMessage): void {
@@ -277,25 +324,26 @@ function handleServerMessage(message: RemoteServerMessage): void {
 
   if (message.type === "AUTH_OK") {
     reconnectAttempt = 0;
-    setPairingState({
-      status: "waiting",
-      sessionId: storedPairing.sessionId,
-      remoteUrl: storedPairing.remoteUrl,
-      pairingPayload: storedPairing.pairingPayload,
-      expiresAt: storedPairing.expiresAt,
-      pairedTabId: storedPairing.pairedTabId
-    });
-    return;
-  }
+    if (pairingState.status !== "connected") {
+      setPairingState(sessionState("waiting", storedPairing, pairingState.activeTabId));
+    }
 
-  if (message.type === "CONTROLLER_CONNECTED") {
-    setPairingState({ ...pairingState, status: "connected" });
+    // Start state delivery as soon as the desktop socket authenticates. This removes
+    // the controller/player ordering race that could leave Netflix phones spinning on
+    // "Connecting" until the phone page was manually refreshed.
     startPolling();
     return;
   }
 
+  if (message.type === "CONTROLLER_CONNECTED") {
+    setPairingState(sessionState("connected", storedPairing, pairingState.activeTabId));
+    startPolling();
+    void pushPlayerState();
+    return;
+  }
+
   if (message.type === "CONTROLLER_DISCONNECTED") {
-    setPairingState({ ...pairingState, status: "temporarily-disconnected" });
+    setPairingState(sessionState("temporarily-disconnected", storedPairing, pairingState.activeTabId));
     stopPolling();
     return;
   }
@@ -312,7 +360,7 @@ function handleServerMessage(message: RemoteServerMessage): void {
   }
 
   if (message.type === "COMMAND") {
-    void sendCommandToPairedTab(message.command).then((response) => {
+    void sendCommandToActiveTab(message.command).then((response) => {
       const result = response.ok
         ? { type: "COMMAND_RESULT", requestId: message.requestId, ok: true, state: response.state }
         : {
@@ -390,6 +438,11 @@ async function cleanup(invalidateServer: boolean): Promise<void> {
   socket?.close();
   socket = null;
 
+  if (lastActiveSupportedTabId !== null) {
+    await exitViewportFullscreenOnTab(lastActiveSupportedTabId);
+    lastActiveSupportedTabId = null;
+  }
+
   const sessionId = storedPairing?.sessionId;
   await savePairing(null);
   setPairingState({ status: "not-paired" });
@@ -401,17 +454,13 @@ async function cleanup(invalidateServer: boolean): Promise<void> {
   disconnecting = false;
 }
 
-async function startPairing(tabId: number, tabUrl: string): Promise<PairingResponse> {
-  if (!getNetflixPageContext(tabUrl).isWatchPage) {
-    return pairingError("NOT_NETFLIX_WATCH_PAGE", "Open a Netflix movie or episode before connecting a phone.");
-  }
-
+async function startPairing(): Promise<PairingResponse> {
   if (!isValidRemoteOrigin(REMOTE_HTTP_ORIGIN) || !isValidRemoteOrigin(REMOTE_WS_ORIGIN)) {
     return pairingError("REMOTE_SERVER_NOT_CONFIGURED", "ChromeRemote relay server is not configured.");
   }
 
   await cleanup(false);
-  setPairingState({ status: "creating", pairedTabId: tabId });
+  setPairingState({ status: "creating" });
 
   try {
     const response = await fetch(`${REMOTE_HTTP_ORIGIN}/api/sessions`, { method: "POST" });
@@ -439,19 +488,13 @@ async function startPairing(tabId: number, tabUrl: string): Promise<PairingRespo
       playerToken: session.playerToken,
       remoteUrl: session.remoteUrl,
       pairingPayload,
-      expiresAt: session.expiresAt,
-      pairedTabId: tabId
+      expiresAt: session.expiresAt
     };
 
+    const active = await getActiveSupportedTab();
+    lastActiveSupportedTabId = active?.tabId ?? null;
     await savePairing(nextPairing);
-    setPairingState({
-      status: "waiting",
-      sessionId: session.sessionId,
-      remoteUrl: session.remoteUrl,
-      pairingPayload,
-      expiresAt: session.expiresAt,
-      pairedTabId: tabId
-    });
+    setPairingState(sessionState("waiting", nextPairing, active?.tabId));
     connectSocket(nextPairing);
     return { ok: true, state: pairingState };
   } catch (error) {
@@ -493,7 +536,7 @@ chrome.runtime.onMessage.addListener((message: PairingRequest, _sender, sendResp
   }
 
   if (message.type === "REMOTE_CONNECT_PHONE") {
-    void startPairing(message.tabId, message.tabUrl).then(sendResponse);
+    void startPairing().then(sendResponse);
     return true;
   }
 
@@ -506,19 +549,14 @@ chrome.runtime.onMessage.addListener((message: PairingRequest, _sender, sendResp
   return false;
 });
 
-void loadPairing().then((pairing) => {
+void loadPairing().then(async (pairing) => {
   if (!pairing) {
     return;
   }
 
   storedPairing = pairing;
-  setPairingState({
-    status: "temporarily-disconnected",
-    sessionId: pairing.sessionId,
-    remoteUrl: pairing.remoteUrl,
-    pairingPayload: pairing.pairingPayload,
-    expiresAt: pairing.expiresAt,
-    pairedTabId: pairing.pairedTabId
-  });
+  const active = await getActiveSupportedTab();
+  lastActiveSupportedTabId = active?.tabId ?? null;
+  setPairingState(sessionState("temporarily-disconnected", pairing, active?.tabId));
   connectSocket(pairing);
 });

@@ -41,7 +41,7 @@ jobs:
       - name: Add installation instructions
         run: |
           cat > dist/INSTALL.txt <<'EOF'
-          ChromeRemote v1.7.3 - Installation & Use
+          ChromeRemote v1.8.0 - Installation & Use
           =========================================
 
           INSTALL ON YOUR COMPUTER
@@ -53,15 +53,23 @@ jobs:
           6. Select the extracted ChromeRemote folder.
           7. Optional: pin ChromeRemote from Chrome's Extensions menu.
 
-          PAIR YOUR PHONE
-          1. Open Netflix and start a movie/episode, OR open a YouTube watch video in Chrome.
-          2. Click the ChromeRemote extension icon.
-          3. Click "Pair Phone".
-          4. A unique QR code will appear.
-          5. Scan the QR with your phone camera, or open:
+          PAIR YOUR PHONE ONCE
+          1. Click the ChromeRemote extension icon from Chrome.
+          2. Click "Pair Phone".
+          3. A unique QR code will appear.
+          4. Scan the QR with your phone camera, or open:
              https://chromeremote-production.up.railway.app/remote_session
              and use the ChromeRemote scanner.
-          6. The phone remote will connect to that specific browser tab.
+          5. The phone is paired to ChromeRemote itself, not one Netflix or YouTube tab.
+          6. Switch between Netflix and YouTube tabs in Chrome. The phone remote follows whichever supported tab is active.
+
+          CHROME-WIDE SESSION
+          - One QR pairs the phone to the ChromeRemote extension session.
+          - Commands are routed to the currently active Netflix or YouTube tab.
+          - Switching between a Netflix tab and a YouTube tab does not require another QR or reconnect.
+          - If an unsupported tab is active, playback controls wait until Chrome is switched back to Netflix or YouTube.
+          - Player state is pushed immediately when the active tab changes.
+          - Desktop state polling starts as soon as the extension authenticates, avoiding the Netflix phone-page refresh race from older builds.
 
           PHONE CONTROLS
           - Play / Pause
@@ -82,10 +90,10 @@ jobs:
 
           FULLSCREEN
           - Phone fullscreen is player-only fullscreen, not Chrome's F11-style browser-window fullscreen.
-          - ChromeRemote does not call YouTube or Netflix native fullscreen from the phone because Chrome requires a trusted local click and otherwise shows a fullscreen error.
-          - Instead, the active Netflix or YouTube player fills the browser viewport directly.
+          - ChromeRemote does not call YouTube or Netflix native fullscreen from the phone because Chrome requires a trusted local click.
+          - ChromeRemote now targets the actual playing video element, removes ancestor clipping/stacking constraints, adds a black backdrop, and pins the video to the entire browser viewport.
           - Exit Fullscreen restores the normal page layout.
-          - If the user entered native fullscreen manually on the computer, Exit Fullscreen can still exit it.
+          - The Chrome tab/address bar can remain visible because true browser fullscreen requires a trusted click or F11.
 
           YOUTUBE AUDIO
           - Mute / Unmute uses YouTube's own player API instead of only changing the raw video element.
@@ -93,9 +101,9 @@ jobs:
           - Volume state is read from YouTube's player API when available.
 
           YOUTUBE SEARCH AND BROWSING
-          - The search bar appears only when ChromeRemote is paired to YouTube.
-          - Searching from the phone opens YouTube's search-results page in the paired desktop tab.
-          - The phone remains connected while browsing YouTube search results.
+          - The search bar appears only when the active Chrome tab is YouTube.
+          - Searching from the phone opens YouTube's search-results page in the active desktop YouTube tab.
+          - The phone remains paired while browsing YouTube search results.
           - Use Previous and Next on the phone to move a visible highlight through desktop YouTube results.
           - ChromeRemote automatically scrolls the selected result into view and loads farther results as you continue downward.
           - Tap Open Video to open the highlighted result without touching the mouse.
@@ -131,5 +139,5 @@ jobs:
             gh release create "$TAG" ChromeRemote-Extension.zip \
               --target "$GITHUB_SHA" \
               --title "$TITLE" \
-              --notes "ChromeRemote v1.7.3 removes remote native-fullscreen attempts that Chrome rejects on YouTube and Netflix. Phone fullscreen now uses a reversible player-only viewport mode with no F11 window fullscreen and no YouTube fullscreen error toast. Netflix Next Episode now safely advances through Netflix's own player-session seek API until Netflix exposes the real next-episode control, then activates it. M7375-safe seeking and YouTube playback controls remain preserved."
+              --notes "ChromeRemote v1.8.0 introduces one Chrome-wide phone session that follows the active Netflix or YouTube tab, removes the tab-bound pairedTabId architecture, starts desktop state delivery immediately to eliminate the Netflix phone-refresh pairing race, and rebuilds player-only fullscreen around the actual video element with a black viewport overlay. Netflix M7375-safe seeking and existing YouTube search/audio controls are preserved."
           fi

@@ -12,6 +12,9 @@ export type PairingState = {
   remoteUrl?: string;
   pairingPayload?: string;
   expiresAt?: string;
+  activeTabId?: number;
+  // Kept for backward compatibility with already-loaded v1.7.x popup code.
+  // v1.8+ does not bind a phone session to one tab.
   pairedTabId?: number;
   errorCode?: PairingErrorCode;
   error?: string;
@@ -30,7 +33,7 @@ export type PairingErrorCode =
 export type PairingRequest =
   | { type: "REMOTE_PING" }
   | { type: "REMOTE_GET_STATUS" }
-  | { type: "REMOTE_CONNECT_PHONE"; tabId: number; tabUrl: string }
+  | { type: "REMOTE_CONNECT_PHONE"; tabId?: number; tabUrl?: string }
   | { type: "REMOTE_DISCONNECT" };
 
 export type PairingResponse =
@@ -196,7 +199,9 @@ export function isPairingRequest(value: unknown): value is PairingRequest {
   }
 
   if (candidate.type === "REMOTE_CONNECT_PHONE") {
-    return typeof candidate.tabId === "number" && Number.isInteger(candidate.tabId) && typeof candidate.tabUrl === "string";
+    const tabIdValid = candidate.tabId === undefined || (typeof candidate.tabId === "number" && Number.isInteger(candidate.tabId));
+    const tabUrlValid = candidate.tabUrl === undefined || typeof candidate.tabUrl === "string";
+    return tabIdValid && tabUrlValid;
   }
 
   return false;

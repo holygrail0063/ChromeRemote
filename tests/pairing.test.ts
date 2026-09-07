@@ -15,8 +15,10 @@ test("background handler diagnostic REMOTE_PING request is recognized", () => {
   assert.equal(isPairingRequest({ type: "REMOTE_PING" }), true);
 });
 
-test("REMOTE_CONNECT_PHONE and REMOTE_DISCONNECT requests are recognized", () => {
+test("Chrome-wide REMOTE_CONNECT_PHONE and legacy tab-bound requests are recognized", () => {
+  assert.equal(isPairingRequest({ type: "REMOTE_CONNECT_PHONE" }), true);
   assert.equal(isPairingRequest({ type: "REMOTE_CONNECT_PHONE", tabId: 184, tabUrl: "https://www.netflix.com/watch/123" }), true);
+  assert.equal(isPairingRequest({ type: "REMOTE_CONNECT_PHONE", tabId: "bad" }), false);
   assert.equal(isPairingRequest({ type: "REMOTE_DISCONNECT" }), true);
 });
 

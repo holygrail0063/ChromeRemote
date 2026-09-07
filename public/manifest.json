@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "ChromeRemote",
   "description": "Phone playback controls for supported Netflix and YouTube video players.",
-  "version": "1.7.3",
+  "version": "1.8.0",
   "action": {
     "default_popup": "popup.html",
     "default_title": "ChromeRemote"
