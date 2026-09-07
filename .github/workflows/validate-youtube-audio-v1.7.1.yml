@@ -1,0 +1,66 @@
+name: Validate YouTube Audio v1.7.1
+
+on:
+  push:
+    branches:
+      - fix/youtube-mute
+    paths:
+      - ".github/workflows/validate-youtube-audio-v1.7.1.yml"
+      - "src/**"
+      - "scripts/**"
+      - "tests/**"
+      - "public/**"
+      - "package.json"
+      - "package-lock.json"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/youtube-mute
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Sync package version
+        run: npm version 1.7.1 --no-git-tag-version --allow-same-version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type and lint checks
+        run: npm run lint
+
+      - name: Build production extension
+        run: npm run build:extension:production
+
+      - name: Run tests
+        run: npm test
+
+      - name: Verify YouTube audio integration
+        run: |
+          grep -q 'youtubePlayer.isMuted' src/netflix/player.ts
+          grep -q 'youtubePlayer.unMute' src/netflix/player.ts
+          grep -q 'youtubePlayer.mute' src/netflix/player.ts
+          grep -q '.ytp-mute-button' src/netflix/player.ts
+          grep -q 'chromeremote-player-fullscreen-ancestor' src/content/player-fullscreen.ts
+
+      - name: Commit synced package metadata
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Sync package metadata for v1.7.1"
+          git push origin HEAD:fix/youtube-mute
