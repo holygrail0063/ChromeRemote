@@ -6,7 +6,13 @@ on:
       - feature/youtube-search
     paths:
       - ".github/workflows/validate-youtube-search.yml"
+      - "src/**"
+      - "remote/**"
+      - "scripts/**"
       - "tests/**"
+      - "public/**"
+      - "package.json"
+      - "package-lock.json"
 
 permissions:
   contents: write
@@ -23,7 +29,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Sync package version
