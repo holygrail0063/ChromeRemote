@@ -1,13 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 
 const rootDir = process.cwd();
 const distDir = resolve(rootDir, "dist");
-const classicScriptPaths = [
-  resolve(distDir, "assets/content.js"),
-  resolve(distDir, "assets/netflix-adapter.js")
-];
+const contentScriptPath = resolve(distDir, "assets/content.js");
+const netflixAdapterPath = resolve(distDir, "assets/netflix-adapter.js");
+const classicScriptPaths = [contentScriptPath, netflixAdapterPath];
 
 const moduleSyntaxPattern = /(^|\n)\s*(import(?:[\s{*(]|\w)|export(?:\s|[{*]))|\bimport\s*\(/;
 const currentTimeWritePattern = /\.currentTime\s*=|currentTime\s*\+=|currentTime\s*-=|currentTime=/;
@@ -22,8 +21,13 @@ for (const scriptPath of classicScriptPaths) {
   assert(existsSync(scriptPath), `${scriptPath} does not exist.`);
   const source = await readFile(scriptPath, "utf8");
   assert(!moduleSyntaxPattern.test(source), `${scriptPath} contains ES module syntax.`);
-  assert(!currentTimeWritePattern.test(source), `${scriptPath} contains a direct currentTime write.`);
 }
+
+// Netflix must never receive a direct HTMLVideoElement.currentTime write because
+// that path can trigger Netflix M7375. YouTube's HTML5 player intentionally uses
+// a small, hostname-guarded direct-seek helper instead.
+const netflixAdapterSource = await readFile(netflixAdapterPath, "utf8");
+assert(!currentTimeWritePattern.test(netflixAdapterSource), `${netflixAdapterPath} contains a direct currentTime write.`);
 
 for (const sourcePath of ["src", "tests", "public"]) {
   const files = await collectFiles(resolve(rootDir, sourcePath));
@@ -33,9 +37,18 @@ for (const sourcePath of ["src", "tests", "public"]) {
     }
 
     const source = await readFile(file, "utf8");
-    assert(!currentTimeWritePattern.test(source), `${file} contains a direct currentTime write.`);
+    const relativePath = relative(rootDir, file).replaceAll("\\", "/");
+    if (!relativePath.startsWith("src/youtube/")) {
+      assert(!currentTimeWritePattern.test(source), `${file} contains a direct currentTime write.`);
+    }
   }
 }
+
+const youtubePlayerPath = resolve(rootDir, "src/youtube/player.ts");
+assert(existsSync(youtubePlayerPath), "src/youtube/player.ts does not exist.");
+const youtubePlayerSource = await readFile(youtubePlayerPath, "utf8");
+assert(youtubePlayerSource.includes('hostname.includes("youtube.com")'), "YouTube seek helper must be hostname guarded.");
+assert(currentTimeWritePattern.test(youtubePlayerSource), "YouTube seek helper must contain the isolated direct seek implementation.");
 
 const manifestPath = resolve(distDir, "manifest.json");
 assert(existsSync(manifestPath), "dist/manifest.json does not exist.");
