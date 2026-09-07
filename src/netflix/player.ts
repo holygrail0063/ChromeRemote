@@ -124,10 +124,6 @@ export class NetflixPlayer {
     this.requireVideo().pause();
   }
 
-  seekTo(seconds: number): void {
-    this.requireVideo().currentTime = seconds;
-  }
-
   setVolume(volume: number): void {
     this.requireVideo().volume = clamp(volume, 0, 1);
   }
