@@ -53,7 +53,10 @@ const REMOTE_COMMAND_TYPES = new Set<PlayerCommand["type"]>([
   "NEXT_EPISODE",
   "FULLSCREEN",
   "EXIT_FULLSCREEN",
-  "SEARCH_YOUTUBE"
+  "SEARCH_YOUTUBE",
+  "YOUTUBE_PREVIOUS_RESULT",
+  "YOUTUBE_NEXT_RESULT",
+  "YOUTUBE_OPEN_SELECTED_RESULT"
 ]);
 
 export function isRemoteCommand(command: unknown): command is PlayerCommand {
