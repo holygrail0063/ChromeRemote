@@ -1,3 +1,5 @@
+import { advanceNetflixEpisode } from "./next-episode";
+
 const CHROMEREMOTE_BRIDGE_REQUEST_SOURCE = "CHROMEREMOTE_CONTENT";
 const CHROMEREMOTE_BRIDGE_RESPONSE_SOURCE = "CHROMEREMOTE_NETFLIX_ADAPTER";
 const SEEK_UNAVAILABLE_ERROR_CODE = "NETFLIX_SEEK_UNAVAILABLE";
@@ -35,7 +37,6 @@ type NetflixBridgeResponse =
 
 interface NetflixPlayerSession {
   seek?: (milliseconds: number) => void;
-  playNextEpisode?: () => void;
   isActive?: () => boolean;
   isPlaying?: () => boolean;
   getCurrentTime?: () => number;
@@ -117,22 +118,24 @@ function getVideoPlayer(): NetflixVideoPlayer | null {
   return api?.videoPlayer ?? null;
 }
 
-function getSessions(videoPlayer: NetflixVideoPlayer): NetflixPlayerSession[] {
+function resolveSession(videoPlayer: NetflixVideoPlayer): NetflixPlayerSession | null {
   const sessionIds = videoPlayer.getAllPlayerSessionIds?.();
   if (!Array.isArray(sessionIds) || sessionIds.length === 0 || !videoPlayer.getVideoPlayerBySessionId) {
-    return [];
+    return null;
   }
 
-  return sessionIds
-    .map((sessionId) => videoPlayer.getVideoPlayerBySessionId?.(sessionId) ?? null)
-    .filter((session): session is NetflixPlayerSession => session !== null);
-}
+  const watchSessionId = sessionIds.find((sessionId) => sessionId.startsWith("watch-"));
+  if (watchSessionId) {
+    const watchSession = videoPlayer.getVideoPlayerBySessionId(watchSessionId);
+    if (watchSession && typeof watchSession.seek === "function") {
+      return watchSession;
+    }
+  }
 
-function resolveSession(
-  videoPlayer: NetflixVideoPlayer,
-  capability: "seek" | "playNextEpisode"
-): NetflixPlayerSession | null {
-  const sessions = getSessions(videoPlayer).filter((session) => typeof session[capability] === "function");
+  const sessions = sessionIds
+    .map((sessionId) => videoPlayer.getVideoPlayerBySessionId?.(sessionId) ?? null)
+    .filter((session): session is NetflixPlayerSession => session !== null && typeof session.seek === "function");
+
   if (sessions.length === 0) {
     return null;
   }
@@ -168,24 +171,6 @@ function resolveSession(
 
   return sessions[0];
 }
-
-const nextEpisodeSelectors = [
-  '[data-uia="next-episode-seamless-button"]',
-  '[data-uia="next-episode-seamless-button-draining"]',
-  '.watch-video--skip-content-button',
-  '.watch-video--skip-preplay-button',
-  'button[data-uia="next-episode-button"]',
-  'button[data-uia="next-episode"]',
-  'button[data-uia="player-next-episode"]',
-  'button[data-uia*="next-episode" i]',
-  '[role="button"][data-uia*="next-episode" i]',
-  'button[aria-label*="Next Episode" i]',
-  'button[aria-label*="Next episode" i]',
-  'button[aria-label="Next" i]',
-  '[role="button"][aria-label*="Next Episode" i]',
-  '[role="button"][aria-label*="Next episode" i]',
-  '[role="button"][aria-label="Next" i]'
-];
 
 const fullscreenSelectors = [
   'button[data-uia="control-fullscreen-enter"]',
@@ -259,27 +244,17 @@ function activateControl(control: HTMLElement): void {
   control.click();
 }
 
-function nextEpisode(requestId: string): NetflixBridgeResponse {
-  const videoPlayer = getVideoPlayer();
-  if (videoPlayer) {
-    const session = resolveSession(videoPlayer, "playNextEpisode");
-    if (session?.playNextEpisode) {
-      try {
-        session.playNextEpisode();
-        return success(requestId);
-      } catch {
-        // Fall back to Netflix's rendered next-episode control.
-      }
-    }
+async function nextEpisode(requestId: string): Promise<NetflixBridgeResponse> {
+  try {
+    await advanceNetflixEpisode();
+    return success(requestId);
+  } catch (error) {
+    return failure(
+      requestId,
+      NEXT_EPISODE_UNAVAILABLE_ERROR_CODE,
+      error instanceof Error ? error.message : "Next episode is not available right now."
+    );
   }
-
-  const control = findUsableControl(nextEpisodeSelectors);
-  if (!control) {
-    return failure(requestId, NEXT_EPISODE_UNAVAILABLE_ERROR_CODE, "Next episode is not available right now.");
-  }
-
-  activateControl(control);
-  return success(requestId);
 }
 
 function delay(milliseconds: number): Promise<void> {
@@ -344,7 +319,7 @@ window.addEventListener("message", (event: MessageEvent<unknown>) => {
   void (async () => {
     try {
       if (request.type === "NEXT_EPISODE") {
-        postResponse(nextEpisode(request.requestId));
+        postResponse(await nextEpisode(request.requestId));
         return;
       }
 
@@ -368,7 +343,7 @@ window.addEventListener("message", (event: MessageEvent<unknown>) => {
         return;
       }
 
-      const session = resolveSession(videoPlayer, "seek");
+      const session = resolveSession(videoPlayer);
       if (!session?.seek) {
         postResponse(
           failure(request.requestId, SEEK_UNAVAILABLE_ERROR_CODE, "ChromeRemote could not resolve an active Netflix player session.")
