@@ -30,7 +30,7 @@ async function sendPairingRequest(
   message:
     | { type: "REMOTE_PING" }
     | { type: "REMOTE_GET_STATUS" }
-    | { type: "REMOTE_CONNECT_PHONE"; tabId: number; tabUrl: string }
+    | { type: "REMOTE_CONNECT_PHONE" }
     | { type: "REMOTE_DISCONNECT" }
 ): Promise<PairingResponse> {
   try {
@@ -47,7 +47,7 @@ function siteName(site: SupportedPlayerSite | null): string {
 function statusCopy(state: PopupState) {
   const name = siteName(state.site);
   if (state.status === "connected") {
-    return { label: `${name} ready`, detail: `ChromeRemote is connected to this ${name} player.` };
+    return { label: `${name} ready`, detail: `The active Chrome tab has a controllable ${name} player.` };
   }
 
   if (state.status === "player-loading") {
@@ -55,18 +55,21 @@ function statusCopy(state: PopupState) {
   }
 
   if (state.status === "supported-browsing") {
-    return { label: `${name} browsing`, detail: `Open a ${state.site === "youtube" ? "video" : "movie or episode"} to pair your phone.` };
+    return {
+      label: `${name} browsing`,
+      detail: `ChromeRemote will follow this tab. Open a ${state.site === "youtube" ? "video" : "movie or episode"} to enable playback controls.`
+    };
   }
 
   if (state.status === "unsupported-site") {
-    return { label: "Unsupported page", detail: "Open Netflix or a YouTube video to use ChromeRemote." };
+    return { label: "No active player", detail: "Your phone can stay paired. Switch this Chrome window to Netflix or YouTube when you want to control playback." };
   }
 
   if (state.status === "communication-error") {
     return { label: "Connection issue", detail: state.error ?? `ChromeRemote cannot reach this ${name} tab.` };
   }
 
-  return { label: "Checking", detail: "Looking for an active Netflix or YouTube player." };
+  return { label: "Checking", detail: "Looking at the active Chrome tab." };
 }
 
 export function Popup() {
@@ -114,7 +117,7 @@ export function Popup() {
       setState({
         status: "communication-error",
         site: pageContext.site,
-        error: `ChromeRemote cannot reach the ${siteName(pageContext.site)} player. Reload the video page or reload the extension.`
+        error: `ChromeRemote cannot reach the ${siteName(pageContext.site)} player yet. Reload the video page if this persists.`
       });
     }
   };
@@ -206,13 +209,7 @@ export function Popup() {
 
   const connectPhone = async () => {
     setPairingError(null);
-    const tab = await getActiveTab();
-    if (!tab?.id || !tab.url) {
-      setPairingError("Open a Netflix title or YouTube video before pairing your phone.");
-      return;
-    }
-
-    const response = await sendPairingRequest({ type: "REMOTE_CONNECT_PHONE", tabId: tab.id, tabUrl: tab.url });
+    const response = await sendPairingRequest({ type: "REMOTE_CONNECT_PHONE" });
     if ("state" in response) {
       setPairing(response.state);
     }
@@ -233,14 +230,13 @@ export function Popup() {
   };
 
   const copy = statusCopy(state);
-  const currentSite = siteName(state.site);
 
   return (
     <main className="popup-shell">
       <header className="topbar">
         <div>
           <h1>ChromeRemote</h1>
-          <p>Pair Netflix or YouTube with your phone</p>
+          <p>Pair your phone once, then control the active Netflix or YouTube tab</p>
         </div>
       </header>
 
@@ -253,18 +249,18 @@ export function Popup() {
       </section>
 
       <section className="phone-panel" aria-label="Phone pairing">
-        <div className="phone-title">Phone Remote</div>
+        <div className="phone-title">Chrome-wide Phone Remote</div>
 
         {pairing.status === "not-paired" ? (
           <>
-            <div className="phone-copy">Pair a phone to use ChromeRemote as your {state.site ? currentSite : "video"} remote.</div>
-            <button type="button" className="phone-action primary-action" disabled={state.status !== "connected"} onClick={() => void connectPhone()}>
+            <div className="phone-copy">Pair once. The phone remote will follow whichever supported Netflix or YouTube tab is active in Chrome.</div>
+            <button type="button" className="phone-action primary-action" onClick={() => void connectPhone()}>
               Pair Phone
             </button>
           </>
         ) : null}
 
-        {pairing.status === "creating" ? <div className="phone-copy">Creating secure session...</div> : null}
+        {pairing.status === "creating" ? <div className="phone-copy">Creating secure Chrome-wide session...</div> : null}
 
         {pairing.status === "waiting" && pairing.pairingPayload ? (
           <>
@@ -273,7 +269,7 @@ export function Popup() {
             {!qrError && !qrDataUrl ? <div className="phone-copy">Preparing QR code...</div> : null}
             {!qrError ? (
               <>
-                <div className="phone-copy centered-copy">Scan this code with your phone.</div>
+                <div className="phone-copy centered-copy">Scan once. You will not need a new QR when switching between Netflix and YouTube tabs.</div>
                 <div className="phone-status waiting">
                   <span aria-hidden="true" /> Waiting for phone...
                 </div>
@@ -290,7 +286,7 @@ export function Popup() {
             <div className="phone-status connected">
               <span aria-hidden="true" /> Phone connected
             </div>
-            <div className="phone-copy">Your phone is now the ChromeRemote controller. You can close this popup.</div>
+            <div className="phone-copy">Your phone is paired to ChromeRemote. Switch between Netflix and YouTube tabs and the remote will follow the active tab automatically.</div>
             <button type="button" className="phone-action" onClick={() => void disconnectPhone()}>
               Disconnect Phone
             </button>
@@ -302,7 +298,7 @@ export function Popup() {
             <div className="phone-status waiting">
               <span aria-hidden="true" /> Phone disconnected
             </div>
-            <div className="phone-copy">Waiting for the phone to reconnect...</div>
+            <div className="phone-copy">Waiting for the phone to reconnect to this Chrome-wide session...</div>
             <button type="button" className="phone-action" onClick={() => void disconnectPhone()}>
               Disconnect Phone
             </button>
@@ -312,7 +308,7 @@ export function Popup() {
         {pairing.status === "expired" ? (
           <>
             <div className="phone-copy">The remote session expired.</div>
-            <button type="button" className="phone-action primary-action" disabled={state.status !== "connected"} onClick={() => void connectPhone()}>
+            <button type="button" className="phone-action primary-action" onClick={() => void connectPhone()}>
               Create New Session
             </button>
           </>
