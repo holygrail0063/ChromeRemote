@@ -40,7 +40,7 @@ jobs:
       - name: Add installation instructions
         run: |
           cat > dist/INSTALL.txt <<'EOF'
-          ChromeRemote v1.4.0 - Installation & Use
+          ChromeRemote v1.5.0 - Installation & Use
           =========================================
 
           INSTALL ON YOUR COMPUTER
@@ -67,10 +67,17 @@ jobs:
           - Rewind 10 seconds / Forward 10 seconds
           - Seek slider
           - Next Episode on Netflix / Next Video on YouTube
+          - YouTube search bar (hidden on Netflix)
           - Fullscreen / Exit Fullscreen
           - Mute / Unmute
           - Volume controls
           - Playback speeds: 0.5x, 0.75x, 1x, 1.25x, 1.5x
+
+          YOUTUBE SEARCH
+          - The search bar appears only when ChromeRemote is paired to YouTube.
+          - Searching from the phone opens YouTube's search-results page in the paired desktop tab.
+          - The phone remains connected while browsing YouTube search results.
+          - Playback controls become available again when a YouTube watch video is opened.
 
           NOTES
           - Keep the extracted extension folder on your computer after installation.
@@ -102,5 +109,5 @@ jobs:
             gh release create "$TAG" ChromeRemote-Extension.zip \
               --target "$GITHUB_SHA" \
               --title "$TITLE" \
-              --notes "ChromeRemote now supports Netflix and YouTube. Download ChromeRemote-Extension.zip, extract it, open INSTALL.txt, then follow the instructions to load it in Chrome and pair your phone."
+              --notes "ChromeRemote v1.5.0 adds YouTube search from the phone while keeping Netflix search-free. Download ChromeRemote-Extension.zip, extract it, open INSTALL.txt, then follow the instructions to load it in Chrome and pair your phone."
           fi
