@@ -58,9 +58,10 @@ jobs:
 
       - name: Verify remote-safe fullscreen
         run: |
-          grep -q 'video.chromeremote-player-fullscreen' src/content/player-fullscreen.ts
-          grep -q 'chromeremote-player-fullscreen-overlay' src/content/player-fullscreen.ts
+          grep -q 'video.${PLAYER_FULLSCREEN_CLASS}' src/content/player-fullscreen.ts
+          grep -q 'PLAYER_FULLSCREEN_OVERLAY_ID' src/content/player-fullscreen.ts
           grep -q 'getLargestVisibleVideo' src/content/player-fullscreen.ts
+          grep -q 'enterVideoViewportFullscreen(video)' src/content/player-fullscreen.ts
           ! grep -q 'requestFullscreen' src/content/player-fullscreen.ts
           ! grep -q 'control.click' src/content/player-fullscreen.ts
 
