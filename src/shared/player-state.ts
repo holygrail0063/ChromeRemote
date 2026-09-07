@@ -1,3 +1,5 @@
+export type PlayerPlatform = "netflix" | "youtube";
+
 export type PlayerState = {
   detected: boolean;
   playing: boolean;
@@ -8,6 +10,7 @@ export type PlayerState = {
   muted: boolean;
   readyState: number;
   ended: boolean;
+  platform?: PlayerPlatform;
   title?: string;
   episode?: string;
 };
