@@ -1,0 +1,74 @@
+name: Validate ChromeRemote v1.7.3
+
+on:
+  push:
+    branches:
+      - fix/netflix-controls-v173
+    paths:
+      - ".github/workflows/validate-v1.7.3.yml"
+      - "src/**"
+      - "remote/**"
+      - "public/**"
+      - "scripts/**"
+      - "tests/**"
+      - "package.json"
+      - "package-lock.json"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/netflix-controls-v173
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Sync package version
+        run: npm version 1.7.3 --no-git-tag-version --allow-same-version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type and lint checks
+        run: npm run lint
+
+      - name: Build production extension
+        run: npm run build:extension:production
+
+      - name: Run tests
+        run: npm test
+
+      - name: Verify remote-safe fullscreen
+        run: |
+          ! grep -q 'requestFullscreen' src/content/player-fullscreen.ts
+          ! grep -q 'control.click' src/content/player-fullscreen.ts
+          grep -q 'enterViewportFullscreen(player)' src/content/player-fullscreen.ts
+          grep -q 'ENTER_PLAYER_FULLSCREEN' remote/src/socket.ts
+          grep -q 'EXIT_PLAYER_FULLSCREEN' remote/src/socket.ts
+
+      - name: Verify Netflix next episode path
+        run: |
+          grep -q 'getDuration' src/netflix/next-episode.ts
+          grep -q 'session.seek' src/netflix/next-episode.ts
+          grep -q 'next-episode-seamless-button' src/netflix/next-episode.ts
+          ! grep -Eq '\.currentTime\s*=' src/netflix/next-episode.ts
+
+      - name: Commit synced package metadata
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Sync package metadata for v1.7.3"
+          git push origin HEAD:fix/netflix-controls-v173
