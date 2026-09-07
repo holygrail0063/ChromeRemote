@@ -1,6 +1,7 @@
 import { NetflixPlayer } from "../netflix/player";
 import { isPlayerCommand, type PlayerCommand, type PlayerResponse } from "../shared/messages";
 import { clampSeekSeconds } from "../shared/seek-utils";
+import { seekYouTubeTo } from "../youtube/player";
 import { requestNetflixAdapter } from "./netflix-seek-bridge";
 
 const player = new NetflixPlayer();
@@ -22,6 +23,18 @@ function getSeekTargetSeconds(command: Extract<PlayerCommand, { type: "SEEK_RELA
   return clampSeekSeconds(state.currentTime + command.seconds, state.duration);
 }
 
+function searchYouTube(query: string): void {
+  if (!isYouTubePage()) {
+    throw new Error("YouTube search is only available on a paired YouTube tab.");
+  }
+
+  const trimmedQuery = query.trim();
+  const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(trimmedQuery)}`;
+
+  // Let the command response reach the phone before navigation replaces the page.
+  window.setTimeout(() => window.location.assign(searchUrl), 50);
+}
+
 async function handleCommand(command: PlayerCommand): Promise<PlayerResponse> {
   try {
     switch (command.type) {
@@ -37,7 +50,7 @@ async function handleCommand(command: PlayerCommand): Promise<PlayerResponse> {
       case "SEEK_TO": {
         const targetSeconds = getSeekTargetSeconds(command);
         if (isYouTubePage()) {
-          player.seekTo(targetSeconds);
+          seekYouTubeTo(targetSeconds);
         } else {
           await requestNetflixAdapter(command.type, targetSeconds);
         }
@@ -68,6 +81,9 @@ async function handleCommand(command: PlayerCommand): Promise<PlayerResponse> {
         break;
       case "TOGGLE_MUTE":
         player.toggleMute();
+        break;
+      case "SEARCH_YOUTUBE":
+        searchYouTube(command.query);
         break;
     }
 

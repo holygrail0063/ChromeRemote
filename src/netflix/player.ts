@@ -86,17 +86,21 @@ function getMediaDetails(platform: PlayerPlatform): { title?: string; episode?: 
 
 export class NetflixPlayer {
   getVideo(): HTMLVideoElement | null {
+    if (getPlatform() === "youtube") {
+      return document.querySelector<HTMLVideoElement>("video.html5-main-video");
+    }
+
     const videos = Array.from(document.querySelectorAll("video"));
     return videos.find((video) => video.readyState > 0 || Number.isFinite(video.duration)) ?? videos[0] ?? null;
   }
 
   getState(): PlayerState {
+    const platform = getPlatform();
     const video = this.getVideo();
     if (!video) {
-      return unavailablePlayerState;
+      return { ...unavailablePlayerState, platform };
     }
 
-    const platform = getPlatform();
     return {
       detected: true,
       playing: !video.paused && !video.ended,
@@ -118,10 +122,6 @@ export class NetflixPlayer {
 
   pause(): void {
     this.requireVideo().pause();
-  }
-
-  seekTo(seconds: number): void {
-    this.requireVideo().currentTime = seconds;
   }
 
   setVolume(volume: number): void {

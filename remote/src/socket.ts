@@ -117,7 +117,7 @@ export class RemoteSocket {
     const message = parseRemoteMessage(raw) as RemoteServerMessage;
 
     if (message.type === "AUTH_OK") {
-      this.onSnapshot({ status: "connecting", state: null, message: "Syncing Netflix player..." });
+      this.onSnapshot({ status: "connecting", state: null, message: "Syncing player..." });
       this.startStateSync();
       return;
     }
@@ -135,7 +135,7 @@ export class RemoteSocket {
       this.onSnapshot({
         status: message.state.detected ? "connected" : "player-loading",
         state: message.state,
-        message: message.state.detected ? "Connected" : "Netflix player is loading..."
+        message: message.state.detected ? "Connected" : "Player is waiting for a video..."
       });
       return;
     }
@@ -152,7 +152,7 @@ export class RemoteSocket {
       } else if (message.state) {
         this.hasPlayerState = true;
         this.stopStateSync();
-        this.onSnapshot({ status: "connected", state: message.state, message: "Connected" });
+        this.onSnapshot({ status: message.state.detected ? "connected" : "player-loading", state: message.state, message: "Connected" });
       }
       return;
     }
