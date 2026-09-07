@@ -18,6 +18,14 @@ const safePlaybackRate = (video: HTMLVideoElement) => {
   return video.playbackRate;
 };
 
+type YouTubePlayerElement = HTMLElement & {
+  isMuted?: () => boolean;
+  mute?: () => void;
+  unMute?: () => void;
+  getVolume?: () => number;
+  setVolume?: (volume: number) => void;
+};
+
 function cleanText(value: string | null | undefined): string | undefined {
   const text = value?.replace(/\s+/g, " ").trim();
   return text ? text : undefined;
@@ -48,6 +56,39 @@ function getYouTubePageMode(): YouTubePageMode {
   }
 
   return "other";
+}
+
+function getYouTubePlayerElement(): YouTubePlayerElement | null {
+  return document.querySelector<YouTubePlayerElement>("#movie_player");
+}
+
+function getYouTubeMuted(video: HTMLVideoElement): boolean {
+  const youtubePlayer = getYouTubePlayerElement();
+  try {
+    if (typeof youtubePlayer?.isMuted === "function") {
+      return youtubePlayer.isMuted();
+    }
+  } catch {
+    // Fall back to the HTML video state if YouTube's player API is unavailable.
+  }
+
+  return video.muted;
+}
+
+function getYouTubeVolume(video: HTMLVideoElement): number {
+  const youtubePlayer = getYouTubePlayerElement();
+  try {
+    if (typeof youtubePlayer?.getVolume === "function") {
+      const volume = youtubePlayer.getVolume();
+      if (Number.isFinite(volume)) {
+        return clamp(volume / 100, 0, 1);
+      }
+    }
+  } catch {
+    // Fall back to the HTML video state if YouTube's player API is unavailable.
+  }
+
+  return clamp(video.volume, 0, 1);
 }
 
 function getNetflixMediaDetails(): { title?: string; episode?: string } {
@@ -123,9 +164,9 @@ export class NetflixPlayer {
       playing: !video.paused && !video.ended,
       currentTime: Number.isFinite(video.currentTime) ? video.currentTime : 0,
       duration: safeDuration(video),
-      volume: clamp(video.volume, 0, 1),
+      volume: platform === "youtube" ? getYouTubeVolume(video) : clamp(video.volume, 0, 1),
       playbackRate: safePlaybackRate(video),
-      muted: video.muted,
+      muted: platform === "youtube" ? getYouTubeMuted(video) : video.muted,
       readyState: video.readyState,
       ended: video.ended,
       platform,
@@ -143,7 +184,20 @@ export class NetflixPlayer {
   }
 
   setVolume(volume: number): void {
-    this.requireVideo().volume = clamp(volume, 0, 1);
+    const clampedVolume = clamp(volume, 0, 1);
+    if (getPlatform() === "youtube") {
+      const youtubePlayer = getYouTubePlayerElement();
+      try {
+        if (typeof youtubePlayer?.setVolume === "function") {
+          youtubePlayer.setVolume(Math.round(clampedVolume * 100));
+          return;
+        }
+      } catch {
+        // Fall back to the HTML video element below.
+      }
+    }
+
+    this.requireVideo().volume = clampedVolume;
   }
 
   setPlaybackRate(rate: number): void {
@@ -151,6 +205,32 @@ export class NetflixPlayer {
   }
 
   toggleMute(): void {
+    if (getPlatform() === "youtube") {
+      const youtubePlayer = getYouTubePlayerElement();
+      try {
+        if (
+          typeof youtubePlayer?.isMuted === "function" &&
+          typeof youtubePlayer.mute === "function" &&
+          typeof youtubePlayer.unMute === "function"
+        ) {
+          if (youtubePlayer.isMuted()) {
+            youtubePlayer.unMute();
+          } else {
+            youtubePlayer.mute();
+          }
+          return;
+        }
+      } catch {
+        // Fall through to YouTube's own mute button, then the video element.
+      }
+
+      const muteButton = document.querySelector<HTMLButtonElement>(".ytp-mute-button");
+      if (muteButton && !muteButton.disabled) {
+        muteButton.click();
+        return;
+      }
+    }
+
     const video = this.requireVideo();
     video.muted = !video.muted;
   }
