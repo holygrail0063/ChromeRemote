@@ -40,7 +40,7 @@ jobs:
       - name: Add installation instructions
         run: |
           cat > dist/INSTALL.txt <<'EOF'
-          ChromeRemote v1.3.0 - Installation & Use
+          ChromeRemote v1.4.0 - Installation & Use
           =========================================
 
           INSTALL ON YOUR COMPUTER
@@ -53,20 +53,20 @@ jobs:
           7. Optional: pin ChromeRemote from Chrome's Extensions menu.
 
           PAIR YOUR PHONE
-          1. Open Netflix in Chrome and start playing a movie or episode.
+          1. Open Netflix and start a movie/episode, OR open a YouTube watch video in Chrome.
           2. Click the ChromeRemote extension icon.
           3. Click "Pair Phone".
           4. A unique QR code will appear.
           5. Scan the QR with your phone camera, or open:
              https://chromeremote-production.up.railway.app/remote_session
              and use the ChromeRemote scanner.
-          6. The phone remote will connect to that specific Netflix session.
+          6. The phone remote will connect to that specific browser tab.
 
           PHONE CONTROLS
           - Play / Pause
           - Rewind 10 seconds / Forward 10 seconds
           - Seek slider
-          - Next Episode
+          - Next Episode on Netflix / Next Video on YouTube
           - Fullscreen / Exit Fullscreen
           - Mute / Unmute
           - Volume controls
@@ -92,7 +92,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION=$(node -p "require('./package.json').version")
+          VERSION=$(node -p "require('./public/manifest.json').version")
           TAG="v${VERSION}"
           TITLE="ChromeRemote v${VERSION}"
 
@@ -102,5 +102,5 @@ jobs:
             gh release create "$TAG" ChromeRemote-Extension.zip \
               --target "$GITHUB_SHA" \
               --title "$TITLE" \
-              --notes "Ready-to-load ChromeRemote extension. Download ChromeRemote-Extension.zip, extract it, open INSTALL.txt, then follow the instructions to load it in Chrome and pair your phone."
+              --notes "ChromeRemote now supports Netflix and YouTube. Download ChromeRemote-Extension.zip, extract it, open INSTALL.txt, then follow the instructions to load it in Chrome and pair your phone."
           fi

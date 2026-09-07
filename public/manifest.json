@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "ChromeRemote",
-  "description": "Local playback controls for the active Netflix video player.",
-  "version": "1.3.0",
+  "description": "Phone playback controls for supported Netflix and YouTube video players.",
+  "version": "1.4.0",
   "action": {
     "default_popup": "popup.html",
     "default_title": "ChromeRemote"
@@ -18,11 +18,17 @@
       "world": "MAIN"
     },
     {
-      "matches": ["https://www.netflix.com/*"],
+      "matches": ["https://www.netflix.com/*", "https://www.youtube.com/*", "https://youtube.com/*", "https://m.youtube.com/*"],
       "js": ["assets/content.js"],
       "run_at": "document_idle"
     }
   ],
-  "host_permissions": ["https://www.netflix.com/*", "http://localhost:8787/*"],
+  "host_permissions": [
+    "https://www.netflix.com/*",
+    "https://www.youtube.com/*",
+    "https://youtube.com/*",
+    "https://m.youtube.com/*",
+    "http://localhost:8787/*"
+  ],
   "permissions": ["activeTab", "storage", "tabs"]
 }

@@ -5,10 +5,14 @@ import { requestNetflixAdapter } from "./netflix-seek-bridge";
 
 const player = new NetflixPlayer();
 
+function isYouTubePage(): boolean {
+  return window.location.hostname.includes("youtube.com");
+}
+
 function getSeekTargetSeconds(command: Extract<PlayerCommand, { type: "SEEK_RELATIVE" | "SEEK_TO" }>): number {
   const state = player.getState();
   if (!state.detected) {
-    throw new Error("No Netflix video element detected.");
+    throw new Error(`No ${isYouTubePage() ? "YouTube" : "Netflix"} video element detected.`);
   }
 
   if (command.type === "SEEK_TO") {
@@ -30,11 +34,15 @@ async function handleCommand(command: PlayerCommand): Promise<PlayerResponse> {
         player.pause();
         break;
       case "SEEK_RELATIVE":
-        await requestNetflixAdapter("SEEK_RELATIVE", getSeekTargetSeconds(command));
+      case "SEEK_TO": {
+        const targetSeconds = getSeekTargetSeconds(command);
+        if (isYouTubePage()) {
+          player.seekTo(targetSeconds);
+        } else {
+          await requestNetflixAdapter(command.type, targetSeconds);
+        }
         break;
-      case "SEEK_TO":
-        await requestNetflixAdapter("SEEK_TO", getSeekTargetSeconds(command));
-        break;
+      }
       case "SET_VOLUME":
         player.setVolume(command.volume);
         break;
@@ -42,13 +50,21 @@ async function handleCommand(command: PlayerCommand): Promise<PlayerResponse> {
         player.setPlaybackRate(command.rate);
         break;
       case "NEXT_EPISODE":
-        await requestNetflixAdapter("NEXT_EPISODE");
+        if (isYouTubePage()) {
+          player.nextYouTubeVideo();
+        } else {
+          await requestNetflixAdapter("NEXT_EPISODE");
+        }
         break;
       case "FULLSCREEN":
-        await requestNetflixAdapter("FULLSCREEN");
+        if (!isYouTubePage()) {
+          await requestNetflixAdapter("FULLSCREEN");
+        }
         break;
       case "EXIT_FULLSCREEN":
-        await requestNetflixAdapter("EXIT_FULLSCREEN");
+        if (!isYouTubePage()) {
+          await requestNetflixAdapter("EXIT_FULLSCREEN");
+        }
         break;
       case "TOGGLE_MUTE":
         player.toggleMute();
@@ -59,7 +75,7 @@ async function handleCommand(command: PlayerCommand): Promise<PlayerResponse> {
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "Unable to control Netflix player.",
+      error: error instanceof Error ? error.message : `Unable to control ${isYouTubePage() ? "YouTube" : "Netflix"} player.`,
       errorCode: error instanceof Error && error.name !== "Error" ? error.name : undefined,
       state: player.getState()
     };
