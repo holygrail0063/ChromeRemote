@@ -1,8 +1,10 @@
 # ChromeRemote
 
-ChromeRemote turns your phone into a remote control for Netflix or YouTube playing in desktop Chrome.
+ChromeRemote turns your phone into a remote control for Netflix and YouTube playing in desktop Chrome.
 
-The Chrome extension stays on the computer, creates a temporary pairing session, and shows a QR code. Your phone scans that QR code, connects to the same session, and becomes the remote.
+Starting with **v1.8.0**, the phone pairs to **ChromeRemote itself**, not to one specific Netflix or YouTube tab. Pair once, then switch between supported tabs in Chrome and the phone remote follows whichever supported tab is currently active.
+
+The Chrome extension stays on the computer, creates a temporary authenticated session, and shows a QR code. Your phone scans that QR code, connects to the same session, and becomes the remote.
 
 ## What ChromeRemote Can Control
 
@@ -14,7 +16,8 @@ From the phone remote you can currently use:
 - Seek through the current video
 - Next Episode on Netflix / Next Video on YouTube
 - YouTube search from the phone
-- Fullscreen
+- Browse YouTube search results with Previous / Next / Open Video
+- Player-only Fullscreen
 - Exit Fullscreen
 - Mute / Unmute
 - Volume down / up
@@ -22,9 +25,9 @@ From the phone remote you can currently use:
 - Playback speed: `0.5x`, `0.75x`, `1x`, `1.25x`, `1.5x`
 - Current title details when the page exposes them
 
-The YouTube search bar is shown only when the paired tab is YouTube. It is hidden completely for Netflix.
+The YouTube search bar appears only while the active Chrome tab is YouTube. It is hidden on Netflix.
 
-The extension popup itself is intentionally simple. It is used for supported-site status, phone pairing, the QR code, and disconnecting the phone. The actual playback controls live on the phone.
+The extension popup is used for status, phone pairing, the QR code, and disconnecting the phone. Playback controls live on the phone.
 
 ---
 
@@ -32,32 +35,28 @@ The extension popup itself is intentionally simple. It is used for supported-sit
 
 ## Recommended: download the ready-to-use extension ZIP
 
-Normal users do **not** need Node.js, npm, Railway, or any build tools.
+Normal users do **not** need Node.js, npm, Git, Railway, or any build tools.
 
 1. Open the repository's **Releases** page:
    `https://github.com/holygrail0063/ChromeRemote/releases`
 2. Open the latest ChromeRemote release.
-3. Download **`ChromeRemote-Extension.zip`** from the release assets.
-4. Extract the ZIP to a permanent folder on your computer. Do not delete this folder after loading the extension.
+3. Download **`ChromeRemote-Extension.zip`**.
+4. Extract the ZIP to a permanent folder on your computer.
 5. In desktop Chrome, open `chrome://extensions`.
-6. Turn on **Developer mode** in the top-right corner.
+6. Turn on **Developer mode**.
 7. Click **Load unpacked**.
-8. Select the folder you extracted from `ChromeRemote-Extension.zip`.
-9. Pin ChromeRemote from Chrome's Extensions menu if you want quick access to it.
+8. Select the extracted ChromeRemote folder.
+9. Optional: pin ChromeRemote from Chrome's Extensions menu.
 
-That is the full installation. The prebuilt extension already points to the hosted ChromeRemote phone/relay service:
+The prebuilt extension already points to the hosted ChromeRemote phone/relay service:
 
 ```text
 https://chromeremote-production.up.railway.app
 ```
 
-You do not need to deploy your own server to use the hosted version.
-
 > ChromeRemote is not currently published in the Chrome Web Store, so Chrome's **Load unpacked** flow is required.
 
 ## Optional: build from source
-
-Developers who prefer to build the extension themselves can clone the repository:
 
 ```bash
 git clone https://github.com/holygrail0063/ChromeRemote.git
@@ -72,34 +71,9 @@ Then open `chrome://extensions`, enable **Developer mode**, choose **Load unpack
 
 # How to Use ChromeRemote
 
-## 1. Start a supported video on the computer
+## 1. Pair your phone once
 
-Use either:
-
-- Netflix: open a movie or episode on a `netflix.com/watch/...` page.
-- YouTube: open a normal YouTube watch page such as `youtube.com/watch?v=...`.
-
-ChromeRemote pairs to the exact browser tab that is active when you create the session.
-
-## 2. Open the ChromeRemote extension
-
-Click the ChromeRemote extension icon.
-
-You should see a status such as:
-
-```text
-Netflix ready
-```
-
-or:
-
-```text
-YouTube ready
-```
-
-If ChromeRemote says the player is not ready, make sure the video has loaded and refresh the page if necessary.
-
-## 3. Pair your phone
+You can create the phone session from the ChromeRemote extension popup.
 
 Click:
 
@@ -109,21 +83,17 @@ Pair Phone
 
 ChromeRemote creates a temporary session and shows a QR code.
 
-That QR code is unique to the pairing session. It contains a randomly generated session ID and controller token, so another random ChromeRemote session cannot control your paired tab.
+The session belongs to the ChromeRemote extension, **not to the tab that happened to be open when the QR was created**.
 
-## 4. Scan the QR code
+## 2. Scan the QR code
 
-You have two supported ways to connect the phone.
+### Option A: normal phone camera
 
-### Option A: scan with the normal phone camera
+Open the normal camera app on your phone and scan the QR code shown by the extension.
 
-Open the normal camera app on your phone and point it at the ChromeRemote QR code.
+Tap the link shown by the phone. The ChromeRemote phone page opens with the temporary pairing data in the URL fragment.
 
-The QR opens the ChromeRemote phone page and includes the temporary pairing information in the URL fragment.
-
-Tap the link shown by the phone. ChromeRemote opens already connected to that desktop session.
-
-### Option B: use the ChromeRemote scanner
+### Option B: ChromeRemote scanner
 
 On the phone, open:
 
@@ -133,115 +103,138 @@ https://chromeremote-production.up.railway.app/remote_session
 
 Tap **Open Camera**, allow camera access, and scan the QR code shown by the extension.
 
-The phone then connects to the exact ChromeRemote session created by your computer.
+## 3. Switch to Netflix or YouTube on the computer
 
-## 5. Control playback from your phone
+ChromeRemote routes commands to the **currently active supported Chrome tab**.
 
-Once paired, the phone displays the ChromeRemote controls.
+Supported behavior:
 
-The extension popup can be closed. The Chrome background service worker continues to own the session and routes phone commands to the paired browser tab.
+- Switch from a Netflix tab to a YouTube tab: the phone remote follows YouTube automatically.
+- Switch from YouTube back to Netflix: the phone remote follows Netflix automatically.
+- Navigate YouTube from a watch page to search results: the same phone session remains connected.
+- Open an unsupported tab: the phone stays paired but playback controls wait until Netflix or YouTube becomes active again.
 
-The phone remote stays associated with the same session when the phone page is refreshed. The temporary session information is kept in the URL fragment so the phone can reconnect to the same desktop session.
+You do **not** need to create another QR just because you switch between Netflix and YouTube.
 
-## 6. Search YouTube from the phone
+## 4. Start playback
 
-When the paired tab is YouTube, the phone remote shows a **Search YouTube** field near the top.
+For Netflix, open a movie or episode on a `netflix.com/watch/...` page.
 
-Enter a search and tap **Search**. The paired desktop tab opens YouTube's normal search-results page.
+For YouTube, open a normal watch page such as `youtube.com/watch?v=...`.
+
+The extension background worker watches Chrome tab activation and player state changes, then pushes the active player's state to the phone.
+
+## 5. Control playback from the phone
+
+Once paired, the extension popup can be closed. The Manifest V3 background service worker keeps the session alive and routes commands to the active supported tab.
+
+The phone page can be refreshed and should reconnect to the same active session while the session is still valid.
+
+## 6. Search and browse YouTube from the phone
+
+When the active tab is YouTube, the phone remote shows **Search YouTube**.
+
+Enter a search and tap **Search**. The active desktop YouTube tab opens YouTube's normal search-results page.
 
 While the desktop is on YouTube search results:
 
 - the phone remains paired
-- the YouTube search bar remains available
+- the YouTube search field remains available
 - playback buttons are disabled because no main watch video is active
-- opening a YouTube video makes playback controls available again
+- **Previous** and **Next** move a visible highlight through search results
+- ChromeRemote scrolls the selected result into view
+- **Open Video** opens the highlighted result
+- playback controls become active again when the selected video opens
 
 ChromeRemote only treats YouTube's main watch-player video as controllable. Hover-preview videos on search pages are ignored.
 
-The search field is not rendered for Netflix.
-
 ## 7. Disconnect
 
-You can disconnect from either side.
+On the phone, tap the green **Connected** pill and choose **Disconnect from Chrome**.
 
-On the phone, tap the green **Connected** pill and choose:
+You can also disconnect from the ChromeRemote extension popup.
 
-```text
-Disconnect from Chrome
-```
-
-You can also disconnect the phone from the ChromeRemote extension popup.
-
-Disconnecting invalidates the temporary session so the old pairing URL can no longer control the desktop.
+Disconnecting invalidates the temporary session so the old pairing link can no longer control the desktop.
 
 ---
 
-# Phone Remote Controls
+# Chrome-wide Session Behavior
 
-## Netflix
+ChromeRemote v1.8.0 removed the old permanent `pairedTabId` design.
 
-```text
-ChromeRemote                         Connected
-Netflix Player
+The background service worker now:
 
-[ Next Episode ]       [ Fullscreen ]
-[ Exit Fullscreen ]    [ Mute / Unmute ]
+- owns one authenticated phone session for the extension
+- finds the active tab in the last-focused Chrome window for each command/state update
+- supports active Netflix and YouTube tabs
+- immediately pushes a new player state when Chrome tabs change
+- automatically cleans up ChromeRemote player-only fullscreen on the previous tab when switching away
+- retries briefly when a newly activated supported tab is still loading its content script
+- starts desktop player-state polling as soon as the extension WebSocket authenticates
 
-Volume
-[ - ] -------- slider -------- [ + ]
+Starting state polling immediately also removes the older Netflix race where the phone could remain on **Connecting...** until the remote page was manually refreshed.
 
-Current Time / Duration
---------- seek slider ---------
+---
 
-[ -10 ]      [ Play / Pause ]      [ +10 ]
+# Fullscreen Behavior
 
-Playback Speed
-[ 0.5x ] [ 0.75x ] [ 1x ] [ 1.25x ] [ 1.5x ]
-```
+Web browsers require a **trusted local user gesture** for the real Fullscreen API. A command arriving from a phone over WebSocket cannot provide that user activation.
 
-## YouTube
+ChromeRemote therefore does **not** press YouTube/Netflix's native fullscreen button and does **not** use Chrome's F11-style browser-window fullscreen.
 
-```text
-ChromeRemote                         Connected
-YouTube Player
+Phone **Fullscreen** now uses a player-only viewport mode:
 
-Search YouTube
-[ Search videos................ ] [ Search ]
+1. ChromeRemote finds the actual visible playing `<video>` element.
+2. It removes ancestor clipping/stacking constraints that could trap the video inside the site's layout.
+3. It adds a black backdrop.
+4. It pins the video over the entire browser content viewport.
+5. **Exit Fullscreen** restores the page.
 
-[ Next Video ]         [ Fullscreen ]
-[ Exit Fullscreen ]    [ Mute / Unmute ]
+Because this is intentionally not F11/browser fullscreen, Chrome's tab bar and address bar may remain visible. Hiding Chrome's own UI remotely would require browser fullscreen, which Chrome does not allow without a trusted local action.
 
-Volume
-[ - ] -------- slider -------- [ + ]
+---
 
-Current Time / Duration
---------- seek slider ---------
+# Netflix Notes
 
-[ -10 ]      [ Play / Pause ]      [ +10 ]
+Netflix seeking must not use a direct `HTMLVideoElement.currentTime` write because that can trigger Netflix error **M7375**.
 
-Playback Speed
-[ 0.5x ] [ 0.75x ] [ 1x ] [ 1.25x ] [ 1.5x ]
-```
+ChromeRemote keeps a Netflix MAIN-world adapter and uses Netflix's internal player-session seek operation instead.
 
-The layout automatically scales for phone-sized displays.
+For **Next Episode**:
+
+- ChromeRemote first tries the real visible Netflix next-episode control.
+- If Netflix has not rendered that control yet, ChromeRemote uses Netflix's internal M7375-safe seek path to advance to the end and activates the real Next Episode control when Netflix exposes it.
+
+The build verifier prevents Netflix code from introducing direct `video.currentTime` writes.
+
+---
+
+# YouTube Notes
+
+YouTube uses its main `video.html5-main-video` watch-player element for playback.
+
+Mute / Unmute uses YouTube's own player API when available, with YouTube's native mute control as fallback.
+
+YouTube direct seek is isolated in a hostname-guarded YouTube helper and is never reused for Netflix.
 
 ---
 
 # Updating the Extension
 
+Unpacked Chrome extensions do not update themselves from GitHub.
+
 When a newer ChromeRemote release is available:
 
 1. Download the new `ChromeRemote-Extension.zip` from GitHub Releases.
-2. Extract it to your ChromeRemote extension folder, replacing the previous files, or extract it to a new folder.
+2. Extract it over your existing ChromeRemote extension folder, or extract it to a new permanent folder.
 3. Open `chrome://extensions`.
-4. Click **Reload** on ChromeRemote. If you used a new folder, remove the old unpacked extension and load the new folder instead.
-5. Refresh any open Netflix or YouTube tabs.
+4. Click **Reload** on ChromeRemote. If using a new folder, remove the old unpacked extension and load the new folder.
+5. Refresh open Netflix and YouTube pages.
+6. Pair a new phone session after an extension upgrade.
 
 ---
 
-# Pairing and Session Behavior
-
-ChromeRemote uses temporary authenticated sessions.
+# Pairing and Security
 
 When **Pair Phone** is pressed, the relay creates:
 
@@ -249,7 +242,7 @@ When **Pair Phone** is pressed, the relay creates:
 - a random `playerToken` for the Chrome extension
 - a random `controllerToken` for the phone
 
-The QR code includes the session-specific phone pairing data. The controller token is placed in the URL fragment after `#`, so it is handled by the phone application rather than sent as a normal HTTP query parameter.
+The QR code contains the session-specific phone pairing data. The controller token is placed in the URL fragment after `#` rather than in a normal HTTP query parameter.
 
 Sessions currently:
 
@@ -277,28 +270,31 @@ ChromeRemote relay
     v
 Chrome extension background service worker
     |
+    | resolves active supported tab
     v
-Paired Netflix or YouTube tab
+Active Netflix or YouTube tab
     |
     v
 Supported web player
 ```
 
-The extension popup is not required to remain open after pairing.
+The popup does not need to remain open after pairing.
 
 The background service worker owns:
 
-- the paired browser tab ID
+- the Chrome-wide phone session
 - relay WebSocket connection
 - session reconnect state
 - controller connection status
-- player state polling while the phone is connected
+- active supported-tab resolution
+- tab-change player-state updates
+- player-state polling
 
-Netflix keeps its dedicated page adapter for Netflix-specific operations. YouTube uses the main HTML5 watch-player video for standard playback controls.
+Netflix keeps its dedicated MAIN-world adapter for Netflix-specific operations. YouTube uses the main HTML5 watch-player video for standard playback controls.
 
 ---
 
-# Privacy and Security
+# Privacy
 
 ChromeRemote is a remote control, not a casting or media-download system.
 
@@ -317,14 +313,14 @@ ChromeRemote does not intentionally transmit:
 
 The relay receives typed remote-control messages and minimal player state required to keep the phone UI synchronized.
 
-For YouTube search, the typed search phrase is sent through the authenticated ChromeRemote session to the paired browser tab so that tab can open a normal YouTube search URL.
+For YouTube search, the typed search phrase is sent through the authenticated ChromeRemote session to the active YouTube tab so that tab can open a normal YouTube search URL.
 
 The relay:
 
 - generates cryptographically random pairing secrets
 - stores hashes of session tokens server-side
-- authenticates both the desktop and phone WebSocket connections
-- allow-lists supported remote commands
+- authenticates both desktop and phone WebSocket connections
+- allow-lists supported commands
 - validates YouTube search commands and limits search length
 - rate-limits command traffic
 - expires temporary sessions
@@ -336,75 +332,59 @@ ChromeRemote does not request `<all_urls>`, cookie access, debugger access, nati
 
 # Troubleshooting
 
-## Chrome says the extension folder cannot be loaded
+## The extension folder cannot be loaded
 
-Make sure you selected the **extracted release folder containing `manifest.json`**, not the ZIP file itself and not an extra parent folder.
+Select the extracted release folder that directly contains `manifest.json`, not the ZIP and not an extra parent folder.
 
-## The extension says the player is not ready
+## The phone stays on Connecting
 
-For Netflix:
+With v1.8.0, the extension starts player-state polling as soon as its desktop WebSocket authenticates. A manual phone refresh should no longer be required for Netflix.
 
-1. Netflix is open in Chrome.
-2. You are on a `/watch/...` page.
-3. A movie or episode has actually loaded.
+If the phone remains stuck:
 
-For YouTube:
+1. confirm the extension popup says the phone is connected or waiting
+2. refresh the Netflix/YouTube page after updating the extension
+3. reload ChromeRemote from `chrome://extensions`
+4. create a fresh QR session
 
-1. YouTube is open in Chrome.
-2. You are on a normal `/watch?v=...` video page to create the initial pairing.
-3. The main YouTube player has loaded.
+## I switched from Netflix to YouTube but the remote did not change
 
-Refresh the video page after reloading or updating the extension.
+Make sure the target tab is the active tab in the Chrome window you are using. ChromeRemote follows the active supported tab in the last-focused Chrome window.
 
-## Pair Phone does not show a QR code
+## Playback controls are disabled
 
-Reload the unpacked extension from:
+This is expected when:
 
-```text
-chrome://extensions
-```
+- an unsupported Chrome tab is active
+- Netflix/YouTube is still loading
+- YouTube is showing search results instead of a watch video
 
-Then refresh the supported video tab and try **Pair Phone** again.
+The phone remains paired. Switch/open a playable Netflix or YouTube page and controls should become active again.
 
-## The phone cannot scan the QR code
+## Fullscreen does not hide the Chrome toolbar
 
-Try either pairing method:
+That is expected. ChromeRemote player fullscreen fills the **webpage viewport**, not Chrome's F11/browser fullscreen. Chrome requires a local trusted action to enter true native fullscreen.
 
-- scan the QR with the phone's normal camera, or
-- open `https://chromeremote-production.up.railway.app/remote_session`, tap **Open Camera**, and scan from inside ChromeRemote
+## The phone remote disconnects after a Railway deployment
 
-Make sure the QR code is fully visible and the phone has camera permission.
-
-## YouTube playback buttons are disabled after I search
-
-That is expected while the desktop tab is showing YouTube search results. The phone remains connected and its search field stays available. Open a video from the desktop search results and the playback controls will become active again.
-
-## The phone remote disconnects after a service deployment
-
-Sessions are currently held in relay memory. A server restart or Railway deployment clears active sessions.
-
-Create a new session from the extension and scan the new QR code.
-
-## I refreshed the phone page
-
-The phone should reconnect to the same active session because the session information is kept in the URL fragment. The newly authenticated controller connection replaces the previous connection for that same pairing.
-
-If the session has expired or was disconnected, create a new pairing session from the extension.
+Sessions are stored in relay memory. A server restart or deployment clears active sessions. Create a new QR session.
 
 ## Netflix controls stop responding after changing episodes
 
-Wait a moment for Netflix to replace or update its player, then try again. ChromeRemote resolves the current Netflix player instead of permanently holding the original video element.
+Wait briefly for Netflix to replace/update its player. ChromeRemote resolves the current Netflix player rather than permanently holding the original video element.
 
 ---
 
 # Development
 
-Normal users can ignore this section and install the prebuilt release ZIP instead.
-
-Install dependencies:
+Normal users can ignore this section and use the release ZIP.
 
 ```bash
 npm ci
+npm run lint
+npm test
+npm run build:extension:production
+npm run build:railway
 ```
 
 Build everything:
@@ -413,80 +393,53 @@ Build everything:
 npm run build
 ```
 
-Build only the production extension:
-
-```bash
-npm run build:extension:production
-```
-
-Run type/lint checks:
-
-```bash
-npm run lint
-```
-
-Run tests:
-
-```bash
-npm test
-```
-
-Build the Railway server and mobile remote:
-
-```bash
-npm run build:railway
-```
-
-Start the server:
+Start the relay/server:
 
 ```bash
 npm start
 ```
 
-For local development, the repository includes development environment configuration for:
+Local development defaults include:
 
 ```text
 http://localhost:8787
 ws://localhost:8787
 ```
 
-Remember: `localhost` on a phone means the phone itself, not your computer.
+Remember that `localhost` on a phone means the phone itself, not the computer.
 
 ---
 
 # Extension Release Packaging
 
-The repository automatically builds a ready-to-load extension package with GitHub Actions.
-
-The release workflow:
+The GitHub Actions release workflow:
 
 1. installs dependencies with `npm ci`
 2. runs `npm run build:extension:production`
 3. verifies the production extension build
-4. packages the contents of `dist/` as `ChromeRemote-Extension.zip`
-5. publishes that ZIP under the GitHub release matching the version in `public/manifest.json`
-
-This keeps the public download package separate from source code and ensures users receive the production-configured extension.
+4. adds `INSTALL.txt`
+5. packages `dist/` as `ChromeRemote-Extension.zip`
+6. publishes the ZIP under the GitHub release matching `public/manifest.json`
 
 ---
 
-# Self-Hosting the Relay
+# Self-Hosting
 
 The repository includes `railway.json` and can be deployed as one Railway service.
 
-The production service builds with:
+Production service build:
 
 ```bash
 npm run build:railway
 ```
 
-and starts with:
+Start:
 
 ```bash
 npm start
 ```
 
-For your own deployment, configure:
+For your own deployment configure:
 
 ```text
 PUBLIC_ORIGIN=https://your-domain.example
@@ -494,7 +447,7 @@ VITE_REMOTE_HTTP_ORIGIN=https://your-domain.example
 VITE_REMOTE_WS_ORIGIN=wss://your-domain.example
 ```
 
-Then rebuild the extension so its background bundle and manifest point to your relay domain.
+Then rebuild the extension so its production bundle points to your relay.
 
 The server exposes:
 
@@ -508,7 +461,7 @@ GET    /assets/*
 WS     /ws
 ```
 
-For the current in-memory session implementation, run a single relay replica. Horizontal scaling would require shared session state such as Redis or another shared store.
+For the current in-memory session implementation, use a single relay replica unless you add shared session storage.
 
 ---
 
@@ -516,16 +469,17 @@ For the current in-memory session implementation, run a single relay replica. Ho
 
 ```text
 ChromeRemote/
-├─ .github/workflows/  automated validation and extension release packaging
+├─ .github/workflows/  validation and release packaging
 ├─ src/
-│  ├─ background/      MV3 service worker and phone-session bridge
+│  ├─ background/      MV3 service worker and Chrome-wide phone-session router
 │  ├─ content/         supported-site content script and command routing
-│  ├─ netflix/         Netflix adapter plus shared web-player wrapper
+│  ├─ netflix/         Netflix adapter and M7375-safe player operations
 │  ├─ popup/           pairing/status extension popup
-│  └─ shared/          shared protocol, pairing, state, URL, and config types
+│  ├─ shared/          protocol, pairing, state, URL, and config types
+│  └─ youtube/         YouTube-specific player helpers
 ├─ remote/             phone React application
 ├─ server/             Node.js relay service
-├─ scripts/            extension/server build verification scripts
+├─ scripts/            build/release safety checks
 ├─ tests/              automated tests
 ├─ public/             extension manifest/static assets
 ├─ railway.json        Railway deployment configuration
@@ -538,5 +492,5 @@ ChromeRemote/
 
 - ChromeRemote currently targets Netflix and YouTube in desktop Chrome.
 - It is an independent project and is not affiliated with or endorsed by Netflix, YouTube, or Google.
-- Supported sites can change their web player implementations at any time, which may require ChromeRemote compatibility updates.
+- Supported sites can change their web player implementations at any time, which may require compatibility updates.
 - The extension is currently installed as an unpacked extension rather than through the Chrome Web Store.
