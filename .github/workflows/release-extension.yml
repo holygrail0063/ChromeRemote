@@ -41,7 +41,7 @@ jobs:
       - name: Add installation instructions
         run: |
           cat > dist/INSTALL.txt <<'EOF'
-          ChromeRemote v1.7.2 - Installation & Use
+          ChromeRemote v1.7.3 - Installation & Use
           =========================================
 
           INSTALL ON YOUR COMPUTER
@@ -76,16 +76,16 @@ jobs:
           - Playback speeds: 0.5x, 0.75x, 1x, 1.25x, 1.5x
 
           NETFLIX CONTROLS
-          - Next Episode now uses Netflix's active player-session command first, with the visible Netflix button as a fallback.
-          - Netflix fullscreen falls back to the actual video element filling the browser viewport when native fullscreen is blocked by Chrome.
-          - Exit Fullscreen removes that player-only fullscreen state and restores the normal Netflix page.
-          - Netflix's M7375-safe seek implementation is unchanged.
+          - Next Episode first uses the visible Netflix next-episode control when available.
+          - If it is not visible yet, ChromeRemote safely advances Netflix to the end through Netflix's own player-session seek API, then presses the real Next Episode control as soon as Netflix renders it.
+          - Netflix's M7375-safe seek implementation is preserved. ChromeRemote never writes video.currentTime on Netflix.
 
           FULLSCREEN
-          - Fullscreen targets the Netflix or YouTube video player, not Chrome's F11-style browser window fullscreen.
-          - ChromeRemote first uses the site's native player fullscreen control when Chrome permits it.
-          - If Chrome blocks native fullscreen because the command came from the phone rather than a local click, ChromeRemote expands only the player to fill the browser viewport.
-          - Exit Fullscreen returns the player to its normal page layout.
+          - Phone fullscreen is player-only fullscreen, not Chrome's F11-style browser-window fullscreen.
+          - ChromeRemote does not call YouTube or Netflix native fullscreen from the phone because Chrome requires a trusted local click and otherwise shows a fullscreen error.
+          - Instead, the active Netflix or YouTube player fills the browser viewport directly.
+          - Exit Fullscreen restores the normal page layout.
+          - If the user entered native fullscreen manually on the computer, Exit Fullscreen can still exit it.
 
           YOUTUBE AUDIO
           - Mute / Unmute uses YouTube's own player API instead of only changing the raw video element.
@@ -131,5 +131,5 @@ jobs:
             gh release create "$TAG" ChromeRemote-Extension.zip \
               --target "$GITHUB_SHA" \
               --title "$TITLE" \
-              --notes "ChromeRemote v1.7.2 fixes Netflix Next Episode and Netflix player Fullscreen / Exit Fullscreen. Next Episode now uses Netflix's active player-session command first, with DOM controls as fallback. Netflix player-only fullscreen now targets the video element directly when Chrome blocks native fullscreen. M7375-safe seeking and YouTube controls remain unchanged."
+              --notes "ChromeRemote v1.7.3 removes remote native-fullscreen attempts that Chrome rejects on YouTube and Netflix. Phone fullscreen now uses a reversible player-only viewport mode with no F11 window fullscreen and no YouTube fullscreen error toast. Netflix Next Episode now safely advances through Netflix's own player-session seek API until Netflix exposes the real next-episode control, then activates it. M7375-safe seeking and YouTube playback controls remain preserved."
           fi
