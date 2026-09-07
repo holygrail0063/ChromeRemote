@@ -1,4 +1,4 @@
-import { unavailablePlayerState, type PlayerState } from "../shared/player-state";
+import { unavailablePlayerState, type PlayerPlatform, type PlayerState } from "../shared/player-state";
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
@@ -34,7 +34,11 @@ function firstText(selectors: string[]): string | undefined {
   return undefined;
 }
 
-function getMediaDetails(): { title?: string; episode?: string } {
+function getPlatform(): PlayerPlatform {
+  return window.location.hostname.includes("youtube.com") ? "youtube" : "netflix";
+}
+
+function getNetflixMediaDetails(): { title?: string; episode?: string } {
   const titleFromPlayer = firstText([
     '[data-uia="video-title"] [data-uia="title"]',
     '[data-uia="video-title"] .ellipsize-text',
@@ -64,6 +68,22 @@ function getMediaDetails(): { title?: string; episode?: string } {
   };
 }
 
+function getYouTubeMediaDetails(): { title?: string; episode?: string } {
+  const title =
+    firstText(["h1.ytd-watch-metadata yt-formatted-string", "#title h1 yt-formatted-string", "h1.title yt-formatted-string"]) ??
+    cleanText(document.title.replace(/\s*-\s*YouTube\s*$/i, ""));
+  const channel = firstText(["#owner #channel-name a", "ytd-channel-name a", "#upload-info #channel-name"]);
+
+  return {
+    ...(title ? { title } : {}),
+    ...(channel ? { episode: channel } : {})
+  };
+}
+
+function getMediaDetails(platform: PlayerPlatform): { title?: string; episode?: string } {
+  return platform === "youtube" ? getYouTubeMediaDetails() : getNetflixMediaDetails();
+}
+
 export class NetflixPlayer {
   getVideo(): HTMLVideoElement | null {
     const videos = Array.from(document.querySelectorAll("video"));
@@ -76,6 +96,7 @@ export class NetflixPlayer {
       return unavailablePlayerState;
     }
 
+    const platform = getPlatform();
     return {
       detected: true,
       playing: !video.paused && !video.ended,
@@ -86,17 +107,21 @@ export class NetflixPlayer {
       muted: video.muted,
       readyState: video.readyState,
       ended: video.ended,
-      ...getMediaDetails()
+      platform,
+      ...getMediaDetails(platform)
     };
   }
 
   async play(): Promise<void> {
-    const video = this.requireVideo();
-    await video.play();
+    await this.requireVideo().play();
   }
 
   pause(): void {
     this.requireVideo().pause();
+  }
+
+  seekTo(seconds: number): void {
+    this.requireVideo().currentTime = seconds;
   }
 
   setVolume(volume: number): void {
@@ -112,10 +137,18 @@ export class NetflixPlayer {
     video.muted = !video.muted;
   }
 
+  nextYouTubeVideo(): void {
+    const nextButton = document.querySelector<HTMLAnchorElement | HTMLButtonElement>(".ytp-next-button");
+    if (!nextButton) {
+      throw new Error("YouTube next video control is not available.");
+    }
+    nextButton.click();
+  }
+
   private requireVideo(): HTMLVideoElement {
     const video = this.getVideo();
     if (!video) {
-      throw new Error("No Netflix video element detected.");
+      throw new Error(`No ${getPlatform() === "youtube" ? "YouTube" : "Netflix"} video element detected.`);
     }
 
     return video;
