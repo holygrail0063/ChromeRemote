@@ -11,6 +11,8 @@ export type PlayerCommand =
   | { type: "NEXT_EPISODE" }
   | { type: "FULLSCREEN" }
   | { type: "EXIT_FULLSCREEN" }
+  | { type: "ENTER_PLAYER_FULLSCREEN" }
+  | { type: "EXIT_PLAYER_FULLSCREEN" }
   | { type: "TOGGLE_MUTE" }
   | { type: "SEARCH_YOUTUBE"; query: string }
   | { type: "YOUTUBE_PREVIOUS_RESULT" }
@@ -37,6 +39,8 @@ export const PLAYER_COMMAND_TYPES = new Set<PlayerCommand["type"]>([
   "NEXT_EPISODE",
   "FULLSCREEN",
   "EXIT_FULLSCREEN",
+  "ENTER_PLAYER_FULLSCREEN",
+  "EXIT_PLAYER_FULLSCREEN",
   "TOGGLE_MUTE",
   "SEARCH_YOUTUBE",
   "YOUTUBE_PREVIOUS_RESULT",
