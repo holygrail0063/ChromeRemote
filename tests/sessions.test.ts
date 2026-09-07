@@ -46,14 +46,17 @@ test("rejects invalid player and controller auth", () => {
   assert.equal(authenticate(tokens.sessionId, "controller", "bad-token", connection("controller")).ok, false);
 });
 
-test("rejects a second simultaneous controller", () => {
+test("reconnecting controller replaces the previous connection", () => {
   clearSessionsForTests();
   const tokens = createSession();
+  const firstController = connection("controller-1");
+  const secondController = connection("controller-2");
 
-  assert.equal(authenticate(tokens.sessionId, "controller", tokens.controllerToken, connection("controller-1")).ok, true);
-  const second = authenticate(tokens.sessionId, "controller", tokens.controllerToken, connection("controller-2"));
-  assert.equal(second.ok, false);
-  assert.equal(second.ok ? "" : second.errorCode, "CONTROLLER_ALREADY_CONNECTED");
+  assert.equal(authenticate(tokens.sessionId, "controller", tokens.controllerToken, firstController).ok, true);
+  const second = authenticate(tokens.sessionId, "controller", tokens.controllerToken, secondController);
+  assert.equal(second.ok, true);
+  assert.equal(firstController.closed, true);
+  assert.equal(second.ok ? second.session.controller?.id : null, "controller-2");
 });
 
 test("rejects controller commands before a desktop player is connected", () => {
