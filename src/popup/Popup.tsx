@@ -89,7 +89,7 @@ export function Popup() {
       return;
     }
 
-    if (!pageContext.isWatchPage) {
+    if (!pageContext.isPlaybackPage) {
       setState({ status: "supported-browsing", site: pageContext.site, error: null });
       return;
     }
