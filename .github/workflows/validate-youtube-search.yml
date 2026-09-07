@@ -35,11 +35,11 @@ jobs:
       - name: Type and lint checks
         run: npm run lint
 
-      - name: Run tests
-        run: npm test
-
       - name: Build production extension
         run: npm run build:extension:production
+
+      - name: Run tests
+        run: npm test
 
       - name: Build Railway app
         run: npm run build:railway
