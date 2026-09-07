@@ -1,6 +1,7 @@
 import { NetflixPlayer } from "../netflix/player";
 import { isPlayerCommand, type PlayerCommand, type PlayerResponse } from "../shared/messages";
 import { clampSeekSeconds } from "../shared/seek-utils";
+import { seekYouTubeTo } from "../youtube/player";
 import { requestNetflixAdapter } from "./netflix-seek-bridge";
 
 const player = new NetflixPlayer();
@@ -49,7 +50,7 @@ async function handleCommand(command: PlayerCommand): Promise<PlayerResponse> {
       case "SEEK_TO": {
         const targetSeconds = getSeekTargetSeconds(command);
         if (isYouTubePage()) {
-          player.seekTo(targetSeconds);
+          seekYouTubeTo(targetSeconds);
         } else {
           await requestNetflixAdapter(command.type, targetSeconds);
         }
