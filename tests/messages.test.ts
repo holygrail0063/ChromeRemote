@@ -16,6 +16,8 @@ test("accepts next episode and fullscreen commands", () => {
   assert.equal(isPlayerCommand({ type: "NEXT_EPISODE" }), true);
   assert.equal(isPlayerCommand({ type: "FULLSCREEN" }), true);
   assert.equal(isPlayerCommand({ type: "EXIT_FULLSCREEN" }), true);
+  assert.equal(isPlayerCommand({ type: "ENTER_PLAYER_FULLSCREEN" }), true);
+  assert.equal(isPlayerCommand({ type: "EXIT_PLAYER_FULLSCREEN" }), true);
 });
 
 test("validates YouTube search commands", () => {

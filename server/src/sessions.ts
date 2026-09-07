@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import type { PlayerCommand } from "../../src/shared/messages.js";
 import { isRemoteCommand, type RemoteErrorCode, type RemoteRole } from "../../src/shared/remote-protocol.js";
 
 export type SessionTokens = {
@@ -55,6 +56,18 @@ function secretsEqual(left: string, right: string): boolean {
 
 function isLocalPhoneOrigin(hostname: string): boolean {
   return hostname === "localhost" || hostname === [127, 0, 0, 1].join(".") || hostname === [0, 0, 0, 0].join(".");
+}
+
+function normalizeFullscreenCommand(command: PlayerCommand): PlayerCommand {
+  if (command.type === "FULLSCREEN") {
+    return { type: "ENTER_PLAYER_FULLSCREEN" };
+  }
+
+  if (command.type === "EXIT_FULLSCREEN") {
+    return { type: "EXIT_PLAYER_FULLSCREEN" };
+  }
+
+  return command;
 }
 
 export function normalizePublicOrigin(publicOrigin: string, options: CreateSessionOptions = {}): string {
@@ -180,7 +193,11 @@ export function forwardFromController(session: RemoteSession, message: unknown):
   }
 
   session.recentCommandTimestamps.push(now);
-  session.player.send(message);
+  session.player.send({
+    type: "COMMAND",
+    requestId: candidate.requestId,
+    command: normalizeFullscreenCommand(candidate.command as PlayerCommand)
+  });
   return { ok: true };
 }
 

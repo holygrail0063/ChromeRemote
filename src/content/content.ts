@@ -3,6 +3,7 @@ import { isPlayerCommand, type PlayerCommand, type PlayerResponse } from "../sha
 import { clampSeekSeconds } from "../shared/seek-utils";
 import { seekYouTubeTo } from "../youtube/player";
 import { requestNetflixAdapter } from "./netflix-seek-bridge";
+import { enterNetflixPlayerFullscreen, enterYouTubePlayerFullscreen, exitPlayerFullscreen } from "./player-fullscreen";
 
 const player = new NetflixPlayer();
 const youtubeSelectionClass = "chromeremote-youtube-selected-result";
@@ -149,6 +150,24 @@ function searchYouTube(query: string): void {
   window.setTimeout(() => window.location.assign(searchUrl), 50);
 }
 
+async function enterRemotePlayerFullscreen(): Promise<void> {
+  if (isYouTubePage()) {
+    await enterYouTubePlayerFullscreen();
+    return;
+  }
+
+  await enterNetflixPlayerFullscreen(() => requestNetflixAdapter("FULLSCREEN"));
+}
+
+async function exitRemotePlayerFullscreen(): Promise<void> {
+  if (isYouTubePage()) {
+    await exitPlayerFullscreen();
+    return;
+  }
+
+  await exitPlayerFullscreen(() => requestNetflixAdapter("EXIT_FULLSCREEN"));
+}
+
 async function handleCommand(command: PlayerCommand): Promise<PlayerResponse> {
   try {
     switch (command.type) {
@@ -184,14 +203,12 @@ async function handleCommand(command: PlayerCommand): Promise<PlayerResponse> {
         }
         break;
       case "FULLSCREEN":
-        if (!isYouTubePage()) {
-          await requestNetflixAdapter("FULLSCREEN");
-        }
+      case "ENTER_PLAYER_FULLSCREEN":
+        await enterRemotePlayerFullscreen();
         break;
       case "EXIT_FULLSCREEN":
-        if (!isYouTubePage()) {
-          await requestNetflixAdapter("EXIT_FULLSCREEN");
-        }
+      case "EXIT_PLAYER_FULLSCREEN":
+        await exitRemotePlayerFullscreen();
         break;
       case "TOGGLE_MUTE":
         player.toggleMute();
