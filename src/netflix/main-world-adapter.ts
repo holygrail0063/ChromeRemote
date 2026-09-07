@@ -35,6 +35,7 @@ type NetflixBridgeResponse =
 
 interface NetflixPlayerSession {
   seek?: (milliseconds: number) => void;
+  playNextEpisode?: () => void;
   isActive?: () => boolean;
   isPlaying?: () => boolean;
   getCurrentTime?: () => number;
@@ -116,16 +117,22 @@ function getVideoPlayer(): NetflixVideoPlayer | null {
   return api?.videoPlayer ?? null;
 }
 
-function resolveSession(videoPlayer: NetflixVideoPlayer): NetflixPlayerSession | null {
+function getSessions(videoPlayer: NetflixVideoPlayer): NetflixPlayerSession[] {
   const sessionIds = videoPlayer.getAllPlayerSessionIds?.();
   if (!Array.isArray(sessionIds) || sessionIds.length === 0 || !videoPlayer.getVideoPlayerBySessionId) {
-    return null;
+    return [];
   }
 
-  const sessions = sessionIds
+  return sessionIds
     .map((sessionId) => videoPlayer.getVideoPlayerBySessionId?.(sessionId) ?? null)
-    .filter((session): session is NetflixPlayerSession => session !== null && typeof session.seek === "function");
+    .filter((session): session is NetflixPlayerSession => session !== null);
+}
 
+function resolveSession(
+  videoPlayer: NetflixVideoPlayer,
+  capability: "seek" | "playNextEpisode"
+): NetflixPlayerSession | null {
+  const sessions = getSessions(videoPlayer).filter((session) => typeof session[capability] === "function");
   if (sessions.length === 0) {
     return null;
   }
@@ -163,15 +170,14 @@ function resolveSession(videoPlayer: NetflixVideoPlayer): NetflixPlayerSession |
 }
 
 const nextEpisodeSelectors = [
-  'button[data-uia="next-episode-seamless-button"]',
-  'button[data-uia="next-episode-seamless-button-draining"]',
+  '[data-uia="next-episode-seamless-button"]',
+  '[data-uia="next-episode-seamless-button-draining"]',
+  '.watch-video--skip-content-button',
+  '.watch-video--skip-preplay-button',
   'button[data-uia="next-episode-button"]',
   'button[data-uia="next-episode"]',
   'button[data-uia="player-next-episode"]',
   'button[data-uia*="next-episode" i]',
-  '[role="button"][data-uia="next-episode-seamless-button"]',
-  '[role="button"][data-uia="next-episode-button"]',
-  '[role="button"][data-uia="next-episode"]',
   '[role="button"][data-uia*="next-episode" i]',
   'button[aria-label*="Next Episode" i]',
   'button[aria-label*="Next episode" i]',
@@ -254,6 +260,19 @@ function activateControl(control: HTMLElement): void {
 }
 
 function nextEpisode(requestId: string): NetflixBridgeResponse {
+  const videoPlayer = getVideoPlayer();
+  if (videoPlayer) {
+    const session = resolveSession(videoPlayer, "playNextEpisode");
+    if (session?.playNextEpisode) {
+      try {
+        session.playNextEpisode();
+        return success(requestId);
+      } catch {
+        // Fall back to Netflix's rendered next-episode control.
+      }
+    }
+  }
+
   const control = findUsableControl(nextEpisodeSelectors);
   if (!control) {
     return failure(requestId, NEXT_EPISODE_UNAVAILABLE_ERROR_CODE, "Next episode is not available right now.");
@@ -349,7 +368,7 @@ window.addEventListener("message", (event: MessageEvent<unknown>) => {
         return;
       }
 
-      const session = resolveSession(videoPlayer);
+      const session = resolveSession(videoPlayer, "seek");
       if (!session?.seek) {
         postResponse(
           failure(request.requestId, SEEK_UNAVAILABLE_ERROR_CODE, "ChromeRemote could not resolve an active Netflix player session.")
