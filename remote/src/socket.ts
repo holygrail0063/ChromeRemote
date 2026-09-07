@@ -25,6 +25,18 @@ function getRemoteWsOrigin(): string {
   return `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}`;
 }
 
+function routeFullscreenCommand(command: PlayerCommand): PlayerCommand {
+  if (command.type === "FULLSCREEN") {
+    return { type: "ENTER_PLAYER_FULLSCREEN" };
+  }
+
+  if (command.type === "EXIT_FULLSCREEN") {
+    return { type: "EXIT_PLAYER_FULLSCREEN" };
+  }
+
+  return command;
+}
+
 const remoteWsOrigin = getRemoteWsOrigin();
 const stateSyncIntervalMs = 750;
 
@@ -86,7 +98,7 @@ export class RemoteSocket {
 
   command(command: PlayerCommand): Promise<boolean> {
     const requestId = crypto.randomUUID();
-    this.sendRaw({ type: "COMMAND", requestId, command });
+    this.sendRaw({ type: "COMMAND", requestId, command: routeFullscreenCommand(command) });
     return new Promise((resolve) => this.pending.set(requestId, resolve));
   }
 
