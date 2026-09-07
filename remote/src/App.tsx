@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PLAYBACK_RATES, type PlaybackRate, type PlayerCommand } from "../../src/shared/messages";
+import { MAX_YOUTUBE_SEARCH_LENGTH, PLAYBACK_RATES, type PlaybackRate, type PlayerCommand } from "../../src/shared/messages";
 import { decodePairingPayload, stopMediaStreamTracks } from "../../src/shared/pairing";
 import type { PlayerState } from "../../src/shared/player-state";
 import { RemoteSocket, type RemoteSnapshot } from "./socket";
@@ -36,7 +36,8 @@ type IconName =
   | "play"
   | "pause"
   | "forward"
-  | "speed";
+  | "speed"
+  | "search";
 
 function Icon({ name }: { name: IconName }) {
   return (
@@ -103,6 +104,12 @@ function Icon({ name }: { name: IconName }) {
           <path d="M7 18h10" />
         </>
       ) : null}
+      {name === "search" ? (
+        <>
+          <circle cx="11" cy="11" r="6" />
+          <path d="M16 16l4 4" />
+        </>
+      ) : null}
     </svg>
   );
 }
@@ -152,13 +159,16 @@ export function App() {
   const [snapshot, setSnapshot] = useState<RemoteSnapshot>(emptySnapshot);
   const [localSeek, setLocalSeek] = useState<number | null>(null);
   const [localVolume, setLocalVolume] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const [scannedSession, setScannedSession] = useState<ControllerSession | null>(null);
   const [showConnectionMenu, setShowConnectionMenu] = useState(false);
   const socketRef = useRef<RemoteSocket | null>(null);
   const urlSession = useMemo(sessionFromUrl, []);
   const session = scannedSession ?? urlSession;
   const player = snapshot.state;
+  const isYouTube = player?.platform === "youtube";
   const disabled = snapshot.status !== "connected" || !player?.detected;
+  const searchEnabled = isYouTube && (snapshot.status === "connected" || snapshot.status === "player-loading" || snapshot.status === "player-unavailable");
   const progress = localSeek ?? player?.currentTime ?? 0;
   const volume = localVolume ?? Math.round((player?.volume ?? 0) * 100);
   const playbackRate = player?.playbackRate ?? 1;
@@ -219,6 +229,16 @@ export function App() {
     commitVolume(baseVolume + delta);
   };
 
+  const submitYouTubeSearch = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const query = searchQuery.trim();
+    if (!searchEnabled || !query) {
+      return;
+    }
+
+    runCommand({ type: "SEARCH_YOUTUBE", query });
+  };
+
   const disconnectFromChrome = () => {
     setShowConnectionMenu(false);
     socketRef.current?.endSession();
@@ -231,14 +251,14 @@ export function App() {
       <header className="topbar">
         <div>
           <h1>ChromeRemote</h1>
-          <p>Netflix Player</p>
+          <p>{isYouTube ? "YouTube Player" : "Netflix Player"}</p>
         </div>
         <div className="connection-status">
-          {snapshot.status === "connected" ? (
+          {snapshot.status === "connected" || snapshot.status === "player-loading" ? (
             <>
               <button
                 type="button"
-                className={`status-pill status-${snapshot.status}`}
+                className="status-pill status-connected"
                 aria-expanded={showConnectionMenu}
                 aria-haspopup="menu"
                 onClick={() => setShowConnectionMenu((open) => !open)}
@@ -261,6 +281,30 @@ export function App() {
         </div>
       </header>
 
+      {isYouTube ? (
+        <section className="search-panel" aria-label="YouTube search">
+          <form className="youtube-search-form" onSubmit={submitYouTubeSearch}>
+            <label htmlFor="youtube-search">Search YouTube</label>
+            <div className="youtube-search-row">
+              <input
+                id="youtube-search"
+                type="search"
+                value={searchQuery}
+                maxLength={MAX_YOUTUBE_SEARCH_LENGTH}
+                placeholder="Search videos"
+                autoComplete="off"
+                enterKeyHint="search"
+                onChange={(event) => setSearchQuery(event.currentTarget.value)}
+              />
+              <button type="submit" disabled={!searchEnabled || !searchQuery.trim()} aria-label="Search YouTube">
+                <Icon name="search" />
+                <span>Search</span>
+              </button>
+            </div>
+          </form>
+        </section>
+      ) : null}
+
       {player?.title || player?.episode ? (
         <section className="media-details" aria-label="Now playing">
           <span>Now Playing</span>
@@ -269,10 +313,10 @@ export function App() {
         </section>
       ) : null}
 
-      <section className="media-actions" aria-label="Netflix media actions">
+      <section className="media-actions" aria-label={`${isYouTube ? "YouTube" : "Netflix"} media actions`}>
         <button type="button" disabled={disabled} onClick={() => runCommand({ type: "NEXT_EPISODE" })}>
           <Icon name="next" />
-          <span>Next Episode</span>
+          <span>{isYouTube ? "Next Video" : "Next Episode"}</span>
         </button>
         <button type="button" disabled={disabled} onClick={() => runCommand({ type: "FULLSCREEN" })}>
           <Icon name="fullscreen" />
