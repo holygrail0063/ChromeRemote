@@ -3,10 +3,6 @@ const PLAYER_FULLSCREEN_ROOT_CLASS = "chromeremote-player-fullscreen-active";
 const PLAYER_FULLSCREEN_ANCESTOR_CLASS = "chromeremote-player-fullscreen-ancestor";
 const PLAYER_FULLSCREEN_STYLE_ID = "chromeremote-player-fullscreen-style";
 
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
-}
-
 function ensureFullscreenStyle(): void {
   if (document.getElementById(PLAYER_FULLSCREEN_STYLE_ID)) {
     return;
@@ -110,32 +106,15 @@ function getYouTubePlayerRoot(): HTMLElement | null {
 }
 
 function getNetflixPlayerRoot(): HTMLElement | null {
-  return document.querySelector<HTMLVideoElement>("video");
-}
-
-async function tryNativeFullscreen(element: HTMLElement, control?: HTMLElement | null): Promise<boolean> {
-  if (document.fullscreenElement) {
-    return true;
-  }
-
-  if (control) {
-    try {
-      control.click();
-      await delay(250);
-      if (document.fullscreenElement) {
-        return true;
-      }
-    } catch {
-      // Fall through to the Fullscreen API, then the viewport fallback.
-    }
-  }
-
-  try {
-    await element.requestFullscreen();
-    return Boolean(document.fullscreenElement);
-  } catch {
-    return false;
-  }
+  const video = document.querySelector<HTMLVideoElement>("video");
+  return (
+    video?.closest<HTMLElement>('[data-uia="player"], .watch-video, .watch-video--player-view') ??
+    document.querySelector<HTMLElement>('[data-uia="player"], .watch-video, .watch-video--player-view') ??
+    video?.parentElement?.parentElement ??
+    video?.parentElement ??
+    video ??
+    null
+  );
 }
 
 export async function enterYouTubePlayerFullscreen(): Promise<void> {
@@ -144,52 +123,31 @@ export async function enterYouTubePlayerFullscreen(): Promise<void> {
     throw new Error("YouTube player is not available for fullscreen.");
   }
 
-  const control = player.querySelector<HTMLElement>(".ytp-fullscreen-button");
-  if (await tryNativeFullscreen(player, control)) {
-    return;
-  }
-
+  // Remote WebSocket commands do not carry Chrome's transient user activation.
+  // Calling YouTube's native fullscreen button here produces a fullscreen error toast.
+  // Use player-only viewport fullscreen directly instead.
   enterViewportFullscreen(player);
 }
 
-export async function enterNetflixPlayerFullscreen(tryNetflixNativeFullscreen: () => Promise<void>): Promise<void> {
+export async function enterNetflixPlayerFullscreen(_tryNetflixNativeFullscreen: () => Promise<void>): Promise<void> {
   const player = getNetflixPlayerRoot();
   if (!player) {
     throw new Error("Netflix player is not available for fullscreen.");
   }
 
-  try {
-    await tryNetflixNativeFullscreen();
-    if (document.fullscreenElement) {
-      return;
-    }
-  } catch {
-    // Chrome can reject remote native fullscreen because there is no local user gesture.
-  }
-
+  // Native Fullscreen API calls require a trusted local gesture. A phone command cannot
+  // satisfy that requirement, so use a player-only viewport mode that is fully reversible.
   enterViewportFullscreen(player);
 }
 
-export async function exitPlayerFullscreen(tryNetflixNativeExit?: () => Promise<void>): Promise<void> {
+export async function exitPlayerFullscreen(_tryNetflixNativeExit?: () => Promise<void>): Promise<void> {
   if (document.fullscreenElement) {
     try {
       await document.exitFullscreen();
-      exitViewportFullscreen();
-      return;
     } catch {
-      // Fall through to the viewport/native fallback cleanup.
+      // Continue with ChromeRemote's viewport cleanup below.
     }
   }
 
-  if (exitViewportFullscreen()) {
-    return;
-  }
-
-  if (tryNetflixNativeExit) {
-    try {
-      await tryNetflixNativeExit();
-    } catch {
-      // Exit is idempotent from the phone; no fullscreen state is also success.
-    }
-  }
+  exitViewportFullscreen();
 }
