@@ -1,4 +1,4 @@
-import { unavailablePlayerState, type PlayerPlatform, type PlayerState } from "../shared/player-state";
+import { unavailablePlayerState, type PlayerPlatform, type PlayerState, type YouTubePageMode } from "../shared/player-state";
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
@@ -36,6 +36,18 @@ function firstText(selectors: string[]): string | undefined {
 
 function getPlatform(): PlayerPlatform {
   return window.location.hostname.includes("youtube.com") ? "youtube" : "netflix";
+}
+
+function getYouTubePageMode(): YouTubePageMode {
+  if (window.location.pathname === "/watch") {
+    return "watch";
+  }
+
+  if (window.location.pathname === "/results") {
+    return "results";
+  }
+
+  return "other";
 }
 
 function getNetflixMediaDetails(): { title?: string; episode?: string } {
@@ -96,9 +108,14 @@ export class NetflixPlayer {
 
   getState(): PlayerState {
     const platform = getPlatform();
+    const youtubePage = platform === "youtube" ? getYouTubePageMode() : undefined;
     const video = this.getVideo();
     if (!video) {
-      return { ...unavailablePlayerState, platform };
+      return {
+        ...unavailablePlayerState,
+        platform,
+        ...(youtubePage ? { youtubePage } : {})
+      };
     }
 
     return {
@@ -112,6 +129,7 @@ export class NetflixPlayer {
       readyState: video.readyState,
       ended: video.ended,
       platform,
+      ...(youtubePage ? { youtubePage } : {}),
       ...getMediaDetails(platform)
     };
   }
