@@ -30,3 +30,9 @@ test("remote protocol allows validated YouTube searches", () => {
   assert.equal(isRemoteCommand({ type: "SEARCH_YOUTUBE", query: "" }), false);
   assert.equal(isRemoteCommand({ type: "SEARCH_YOUTUBE", query: " ".repeat(10) }), false);
 });
+
+test("remote protocol allows YouTube result navigation", () => {
+  assert.equal(isRemoteCommand({ type: "YOUTUBE_PREVIOUS_RESULT" }), true);
+  assert.equal(isRemoteCommand({ type: "YOUTUBE_NEXT_RESULT" }), true);
+  assert.equal(isRemoteCommand({ type: "YOUTUBE_OPEN_SELECTED_RESULT" }), true);
+});
