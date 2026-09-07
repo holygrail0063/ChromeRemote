@@ -86,6 +86,10 @@ function getMediaDetails(platform: PlayerPlatform): { title?: string; episode?: 
 
 export class NetflixPlayer {
   getVideo(): HTMLVideoElement | null {
+    if (getPlatform() === "youtube") {
+      return document.querySelector<HTMLVideoElement>("video.html5-main-video");
+    }
+
     const videos = Array.from(document.querySelectorAll("video"));
     return videos.find((video) => video.readyState > 0 || Number.isFinite(video.duration)) ?? videos[0] ?? null;
   }
