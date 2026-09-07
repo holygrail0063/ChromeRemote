@@ -26,3 +26,9 @@ test("validates YouTube search commands", () => {
   assert.equal(isPlayerCommand({ type: "SEARCH_YOUTUBE", query: "x".repeat(MAX_YOUTUBE_SEARCH_LENGTH + 1) }), false);
   assert.equal(isPlayerCommand({ type: "SEARCH_YOUTUBE", query: 123 }), false);
 });
+
+test("accepts YouTube result browsing commands", () => {
+  assert.equal(isPlayerCommand({ type: "YOUTUBE_PREVIOUS_RESULT" }), true);
+  assert.equal(isPlayerCommand({ type: "YOUTUBE_NEXT_RESULT" }), true);
+  assert.equal(isPlayerCommand({ type: "YOUTUBE_OPEN_SELECTED_RESULT" }), true);
+});

@@ -169,6 +169,7 @@ export function App() {
   const isYouTube = player?.platform === "youtube";
   const disabled = snapshot.status !== "connected" || !player?.detected;
   const searchEnabled = isYouTube && (snapshot.status === "connected" || snapshot.status === "player-loading" || snapshot.status === "player-unavailable");
+  const browseEnabled = searchEnabled && player?.youtubePage === "results";
   const progress = localSeek ?? player?.currentTime ?? 0;
   const volume = localVolume ?? Math.round((player?.volume ?? 0) * 100);
   const playbackRate = player?.playbackRate ?? 1;
@@ -303,6 +304,26 @@ export function App() {
             </div>
           </form>
         </section>
+      ) : null}
+
+      {browseEnabled ? (
+        <>
+          <section className="controls" aria-label="Browse YouTube search results">
+            <button type="button" onClick={() => runCommand({ type: "YOUTUBE_PREVIOUS_RESULT" })}>
+              <span aria-hidden="true">↑</span>
+              <span>Previous</span>
+            </button>
+            <button type="button" className="primary-control" onClick={() => runCommand({ type: "YOUTUBE_OPEN_SELECTED_RESULT" })}>
+              <Icon name="play" />
+              <span>Open Video</span>
+            </button>
+            <button type="button" onClick={() => runCommand({ type: "YOUTUBE_NEXT_RESULT" })}>
+              <span aria-hidden="true">↓</span>
+              <span>Next</span>
+            </button>
+          </section>
+          <p>Use Previous and Next to move the highlighted result on your computer, then tap Open Video.</p>
+        </>
       ) : null}
 
       {player?.title || player?.episode ? (

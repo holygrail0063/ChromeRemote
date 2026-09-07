@@ -1,4 +1,5 @@
 export type PlayerPlatform = "netflix" | "youtube";
+export type YouTubePageMode = "watch" | "results" | "other";
 
 export type PlayerState = {
   detected: boolean;
@@ -11,6 +12,7 @@ export type PlayerState = {
   readyState: number;
   ended: boolean;
   platform?: PlayerPlatform;
+  youtubePage?: YouTubePageMode;
   title?: string;
   episode?: string;
 };
