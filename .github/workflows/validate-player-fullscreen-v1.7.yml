@@ -8,6 +8,7 @@ on:
       - ".github/workflows/validate-player-fullscreen-v1.7.yml"
       - "src/**"
       - "remote/**"
+      - "server/**"
       - "scripts/**"
       - "tests/**"
       - "public/**"
@@ -56,6 +57,7 @@ jobs:
           grep -q 'EXIT_PLAYER_FULLSCREEN' remote/src/socket.ts
           grep -q 'enterYouTubePlayerFullscreen' src/content/content.ts
           grep -q 'enterNetflixPlayerFullscreen' src/content/content.ts
+          grep -q 'normalizeFullscreenCommand' server/src/sessions.ts
 
       - name: Commit synced package metadata
         run: |
