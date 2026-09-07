@@ -25,6 +25,11 @@ test("remote protocol rejects malformed playback rate", () => {
   assert.equal(isRemoteCommand({ type: "SET_PLAYBACK_RATE", rate: 1.25 }), true);
 });
 
+test("remote protocol allows player fullscreen commands", () => {
+  assert.equal(isRemoteCommand({ type: "ENTER_PLAYER_FULLSCREEN" }), true);
+  assert.equal(isRemoteCommand({ type: "EXIT_PLAYER_FULLSCREEN" }), true);
+});
+
 test("remote protocol allows validated YouTube searches", () => {
   assert.equal(isRemoteCommand({ type: "SEARCH_YOUTUBE", query: "SQL tutorial" }), true);
   assert.equal(isRemoteCommand({ type: "SEARCH_YOUTUBE", query: "" }), false);
