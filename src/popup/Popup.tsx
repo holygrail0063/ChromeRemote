@@ -1,18 +1,20 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
-import { getNetflixPageContext } from "../shared/netflix-url";
+import { getNetflixPageContext, type SupportedPlayerSite } from "../shared/netflix-url";
 import { backgroundUnavailableResponse, decodePairingPayload, type PairingResponse, type PairingState } from "../shared/pairing";
 import type { PlayerCommand, PlayerResponse } from "../shared/messages";
 
-type ConnectionStatus = "checking" | "connected" | "player-loading" | "netflix-browsing" | "not-netflix" | "communication-error";
+type ConnectionStatus = "checking" | "connected" | "player-loading" | "supported-browsing" | "unsupported-site" | "communication-error";
 
 type PopupState = {
   status: ConnectionStatus;
+  site: SupportedPlayerSite | null;
   error: string | null;
 };
 
 const initialState: PopupState = {
   status: "checking",
+  site: null,
   error: null
 };
 
@@ -38,28 +40,33 @@ async function sendPairingRequest(
   }
 }
 
+function siteName(site: SupportedPlayerSite | null): string {
+  return site === "youtube" ? "YouTube" : site === "netflix" ? "Netflix" : "supported video";
+}
+
 function statusCopy(state: PopupState) {
+  const name = siteName(state.site);
   if (state.status === "connected") {
-    return { label: "Netflix ready", detail: "ChromeRemote is connected to this Netflix player." };
+    return { label: `${name} ready`, detail: `ChromeRemote is connected to this ${name} player.` };
   }
 
   if (state.status === "player-loading") {
-    return { label: "Player loading", detail: "Netflix is open. Waiting for playback to become available." };
+    return { label: "Player loading", detail: `${name} is open. Waiting for playback to become available.` };
   }
 
-  if (state.status === "netflix-browsing") {
-    return { label: "Netflix browsing", detail: "Open a movie or episode to pair your phone." };
+  if (state.status === "supported-browsing") {
+    return { label: `${name} browsing`, detail: `Open a ${state.site === "youtube" ? "video" : "movie or episode"} to pair your phone.` };
   }
 
-  if (state.status === "not-netflix") {
-    return { label: "Not Netflix", detail: "Open Netflix to use ChromeRemote." };
+  if (state.status === "unsupported-site") {
+    return { label: "Unsupported page", detail: "Open Netflix or a YouTube video to use ChromeRemote." };
   }
 
   if (state.status === "communication-error") {
-    return { label: "Connection issue", detail: state.error ?? "ChromeRemote cannot reach this Netflix tab." };
+    return { label: "Connection issue", detail: state.error ?? `ChromeRemote cannot reach this ${name} tab.` };
   }
 
-  return { label: "Checking", detail: "Looking for an active Netflix player." };
+  return { label: "Checking", detail: "Looking for an active Netflix or YouTube player." };
 }
 
 export function Popup() {
@@ -72,18 +79,18 @@ export function Popup() {
   const refresh = async () => {
     const tab = await getActiveTab();
     if (!tab?.id) {
-      setState({ status: "communication-error", error: "No active tab is available." });
+      setState({ status: "communication-error", site: null, error: "No active tab is available." });
       return;
     }
 
     const pageContext = getNetflixPageContext(tab.url);
-    if (!pageContext.isNetflix) {
-      setState({ status: "not-netflix", error: null });
+    if (!pageContext.isSupportedSite) {
+      setState({ status: "unsupported-site", site: null, error: null });
       return;
     }
 
     if (!pageContext.isWatchPage) {
-      setState({ status: "netflix-browsing", error: null });
+      setState({ status: "supported-browsing", site: pageContext.site, error: null });
       return;
     }
 
@@ -92,6 +99,7 @@ export function Popup() {
       if (!response.ok) {
         setState({
           status: response.state?.detected ? "connected" : "player-loading",
+          site: pageContext.site,
           error: response.error
         });
         return;
@@ -99,12 +107,14 @@ export function Popup() {
 
       setState({
         status: response.state.detected ? "connected" : "player-loading",
+        site: pageContext.site,
         error: null
       });
     } catch {
       setState({
         status: "communication-error",
-        error: "ChromeRemote cannot reach the Netflix player. Reload Netflix or reload the extension."
+        site: pageContext.site,
+        error: `ChromeRemote cannot reach the ${siteName(pageContext.site)} player. Reload the video page or reload the extension.`
       });
     }
   };
@@ -198,7 +208,7 @@ export function Popup() {
     setPairingError(null);
     const tab = await getActiveTab();
     if (!tab?.id || !tab.url) {
-      setPairingError("Open a Netflix movie or episode before pairing your phone.");
+      setPairingError("Open a Netflix title or YouTube video before pairing your phone.");
       return;
     }
 
@@ -223,13 +233,14 @@ export function Popup() {
   };
 
   const copy = statusCopy(state);
+  const currentSite = siteName(state.site);
 
   return (
     <main className="popup-shell">
       <header className="topbar">
         <div>
           <h1>ChromeRemote</h1>
-          <p>Pair Netflix with your phone</p>
+          <p>Pair Netflix or YouTube with your phone</p>
         </div>
       </header>
 
@@ -246,7 +257,7 @@ export function Popup() {
 
         {pairing.status === "not-paired" ? (
           <>
-            <div className="phone-copy">Pair a phone to use ChromeRemote as your Netflix remote.</div>
+            <div className="phone-copy">Pair a phone to use ChromeRemote as your {state.site ? currentSite : "video"} remote.</div>
             <button type="button" className="phone-action primary-action" disabled={state.status !== "connected"} onClick={() => void connectPhone()}>
               Pair Phone
             </button>
