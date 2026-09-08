@@ -41,7 +41,7 @@ jobs:
       - name: Add installation instructions
         run: |
           cat > dist/INSTALL.txt <<'EOF'
-          ChromeRemote v1.9.1 - Installation & Use
+          ChromeRemote v1.9.2 - Installation & Use
           =========================================
 
           INSTALL ON YOUR COMPUTER
@@ -52,6 +52,11 @@ jobs:
           5. Click "Load unpacked".
           6. Select the extracted ChromeRemote folder.
           7. Optional: pin ChromeRemote from Chrome's Extensions menu.
+
+          IMPORTANT PERMISSION NOTE
+          - v1.9.2 adds Chrome's debugger permission only so YouTube fullscreen can receive a browser-level F key event.
+          - ChromeRemote attaches to the active YouTube tab only for the duration of that single key press and immediately detaches.
+          - The debugger path is not used for playback, seeking, search, Netflix, or browsing data.
 
           PAIR YOUR PHONE ONCE
           1. Click the ChromeRemote extension icon from Chrome.
@@ -77,10 +82,16 @@ jobs:
           - Next Episode on Netflix / Next Video on YouTube
           - YouTube search bar (hidden on Netflix)
           - Browse YouTube search results with Previous / Next / Open Video
-          - Player Fullscreen / Exit Fullscreen
+          - Fullscreen / Exit Fullscreen
           - Mute / Unmute
           - Volume controls
           - Playback speeds: 0.5x, 0.75x, 1x, 1.25x, 1.5x
+
+          YOUTUBE FULLSCREEN
+          - Fullscreen now mimics a real F key press at the browser input level.
+          - ChromeRemote briefly attaches Chrome's debugger input channel to the active YouTube tab, blurs any focused text field, sends KeyF down/up, then immediately detaches.
+          - This uses YouTube's own native F-shortcut behavior instead of resizing YouTube page elements with CSS.
+          - Exit Fullscreen continues to use the normal page fullscreen-exit path.
 
           NETFLIX NEXT EPISODE
           - ChromeRemote first uses Netflix's own active player-session playNextEpisode action when available.
@@ -88,14 +99,9 @@ jobs:
           - ChromeRemote does not seek the current episode to the end to reveal the button.
           - Netflix's M7375-safe normal seek implementation remains unchanged.
 
-          FULLSCREEN
-          - Phone fullscreen is player-only viewport mode, not Chrome's F11-style browser-window fullscreen.
-          - ChromeRemote does not call YouTube or Netflix native fullscreen from the phone because Chrome requires a trusted local click.
-          - v1.9.1 keeps the site's own player DOM intact and isolates its ancestor path from the rest of the webpage.
-          - Sibling page UI such as YouTube's recommendation rail is hidden while player fullscreen is active.
-          - The actual video element is not moved out of the site's player hierarchy and no separate black overlay is placed over it.
-          - Exit Fullscreen removes the isolation classes and restores the normal page layout.
-          - Chrome's own tab/address bar can remain visible because true browser fullscreen requires a trusted click or F11.
+          NETFLIX FULLSCREEN
+          - Netflix keeps the v1.9.1 player-isolation fallback for now.
+          - The YouTube F-key hotfix does not modify Netflix playback or seeking.
 
           YOUTUBE AUDIO
           - Mute / Unmute uses YouTube's own player API instead of only changing the raw video element.
@@ -109,7 +115,7 @@ jobs:
           - Use Previous and Next on the phone to move a visible highlight through desktop YouTube results.
           - ChromeRemote automatically scrolls the selected result into view and loads farther results as you continue downward.
           - Tap Open Video to open the highlighted result without touching the mouse.
-          - Playback controls become available again when the selected YouTube video opens.
+          - Playback controls become available again when the selected video opens.
 
           NOTES
           - Keep the extracted extension folder on your computer after installation.
@@ -141,5 +147,5 @@ jobs:
             gh release create "$TAG" ChromeRemote-Extension.zip \
               --target "$GITHUB_SHA" \
               --title "$TITLE" \
-              --notes "ChromeRemote v1.9.1 fixes player-only fullscreen by isolating the site's real player ancestor path from surrounding webpage UI instead of only enlarging the player shell. YouTube recommendation/sidebar content is hidden during fullscreen, the video remains inside the site's own rendering hierarchy, and Netflix uses the same isolation strategy with a defensive player-root fallback. Chrome-wide pairing, active phone state sync, non-destructive Netflix Next Episode, M7375-safe seeking, YouTube search/browsing, and YouTube audio controls are preserved."
+              --notes "ChromeRemote v1.9.2 changes YouTube Fullscreen to mimic the user's F keyboard shortcut through Chrome's browser-level debugger input channel. ChromeRemote attaches only long enough to blur focused text input, dispatch KeyF down/up to the active YouTube tab, and detach immediately. This replaces the CSS fullscreen workaround for YouTube while preserving Chrome-wide pairing, phone state sync, YouTube search/audio controls, Netflix M7375-safe seeking, and non-destructive Netflix Next Episode behavior. The debugger permission is required specifically for this YouTube fullscreen input path."
           fi
