@@ -1,6 +1,7 @@
 const PLAYER_FULLSCREEN_CLASS = "chromeremote-player-fullscreen";
 const PLAYER_FULLSCREEN_ROOT_CLASS = "chromeremote-player-fullscreen-active";
 const PLAYER_FULLSCREEN_ANCESTOR_CLASS = "chromeremote-player-fullscreen-ancestor";
+const PLAYER_FULLSCREEN_HIDDEN_CLASS = "chromeremote-player-fullscreen-hidden";
 const PLAYER_FULLSCREEN_STYLE_ID = "chromeremote-player-fullscreen-style";
 
 function ensureFullscreenStyle(): void {
@@ -13,8 +14,14 @@ function ensureFullscreenStyle(): void {
   style.textContent = `
     html.${PLAYER_FULLSCREEN_ROOT_CLASS},
     html.${PLAYER_FULLSCREEN_ROOT_CLASS} body {
+      width: 100% !important;
+      height: 100% !important;
       overflow: hidden !important;
       background: #000 !important;
+    }
+
+    .${PLAYER_FULLSCREEN_HIDDEN_CLASS} {
+      display: none !important;
     }
 
     .${PLAYER_FULLSCREEN_ANCESTOR_CLASS} {
@@ -25,6 +32,10 @@ function ensureFullscreenStyle(): void {
       clip: auto !important;
       clip-path: none !important;
       overflow: visible !important;
+      isolation: auto !important;
+      z-index: auto !important;
+      opacity: 1 !important;
+      visibility: visible !important;
     }
 
     .${PLAYER_FULLSCREEN_CLASS} {
@@ -46,7 +57,6 @@ function ensureFullscreenStyle(): void {
       z-index: 2147483647 !important;
       background: #000 !important;
       overflow: hidden !important;
-      isolation: isolate !important;
       visibility: visible !important;
       opacity: 1 !important;
     }
@@ -86,38 +96,28 @@ function getLargestVisibleVideo(selector: string): HTMLVideoElement | null {
   return selected ?? videos[0] ?? null;
 }
 
-function findContainingRoot(video: HTMLVideoElement, selectors: string[]): HTMLElement | null {
-  for (const selector of selectors) {
-    const candidates = Array.from(document.querySelectorAll<HTMLElement>(selector));
-    const containing = candidates
-      .filter((candidate) => candidate !== video && candidate.contains(video))
-      .sort((left, right) => visibleArea(right) - visibleArea(left));
-
-    if (containing[0]) {
-      return containing[0];
-    }
-  }
-
-  return null;
-}
-
-function findLargeVideoAncestor(video: HTMLVideoElement): HTMLElement | null {
+function findNearestLargeAncestor(video: HTMLVideoElement): HTMLElement | null {
+  const videoArea = Math.max(1, visibleArea(video));
   const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
   let ancestor = video.parentElement;
-  let best: HTMLElement | null = null;
+  let fallback: HTMLElement | null = null;
 
   while (ancestor && ancestor !== document.body && ancestor !== document.documentElement) {
     const area = visibleArea(ancestor);
     if (area > 0) {
-      best = ancestor;
-      if (area >= viewportArea * 0.7) {
+      fallback = ancestor;
+
+      // Prefer the first nearby wrapper that is meaningfully player-sized. This keeps
+      // the site's own video/canvas/control hierarchy intact instead of moving <video>.
+      if (area >= videoArea * 0.9 && area >= viewportArea * 0.4) {
         return ancestor;
       }
     }
+
     ancestor = ancestor.parentElement;
   }
 
-  return best;
+  return fallback;
 }
 
 function getYouTubePlayerRoot(): HTMLElement | null {
@@ -129,7 +129,7 @@ function getYouTubePlayerRoot(): HTMLElement | null {
   return (
     video.closest<HTMLElement>("#movie_player, .html5-video-player") ??
     document.querySelector<HTMLElement>("#movie_player, .html5-video-player") ??
-    findLargeVideoAncestor(video)
+    findNearestLargeAncestor(video)
   );
 }
 
@@ -139,48 +139,78 @@ function getNetflixPlayerRoot(): HTMLElement | null {
     return null;
   }
 
+  // Netflix regularly changes wrapper class names. Prefer a nearby known player shell,
+  // then fall back to the nearest large ancestor around the currently visible video.
   return (
-    findContainingRoot(video, [
-      '[data-uia="player"]',
-      ".watch-video--player-view",
-      ".watch-video",
-      '[data-uia="video-canvas"]'
-    ]) ?? findLargeVideoAncestor(video)
+    video.closest<HTMLElement>(
+      '[data-uia="player"], .watch-video--player-view, .watch-video, [data-uia="video-canvas"], [data-uia*="player" i]'
+    ) ?? findNearestLargeAncestor(video)
   );
 }
 
-function markFullscreenAncestors(element: HTMLElement): void {
-  let ancestor = element.parentElement;
-  while (ancestor && ancestor !== document.body && ancestor !== document.documentElement) {
-    ancestor.classList.add(PLAYER_FULLSCREEN_ANCESTOR_CLASS);
-    ancestor = ancestor.parentElement;
-  }
+function clearFullscreenIsolation(): void {
+  document.querySelectorAll(`.${PLAYER_FULLSCREEN_HIDDEN_CLASS}`).forEach((element) => {
+    element.classList.remove(PLAYER_FULLSCREEN_HIDDEN_CLASS);
+  });
+
+  document.querySelectorAll(`.${PLAYER_FULLSCREEN_ANCESTOR_CLASS}`).forEach((element) => {
+    element.classList.remove(PLAYER_FULLSCREEN_ANCESTOR_CLASS);
+  });
 }
 
-function clearFullscreenAncestors(): void {
-  document.querySelectorAll(`.${PLAYER_FULLSCREEN_ANCESTOR_CLASS}`).forEach((ancestor) => {
-    ancestor.classList.remove(PLAYER_FULLSCREEN_ANCESTOR_CLASS);
-  });
+function isolatePlayerPath(root: HTMLElement): void {
+  let child: HTMLElement = root;
+  let parent = child.parentElement;
+
+  while (parent) {
+    if (parent !== document.documentElement) {
+      parent.classList.add(PLAYER_FULLSCREEN_ANCESTOR_CLASS);
+    }
+
+    for (const sibling of Array.from(parent.children)) {
+      if (sibling === child || !(sibling instanceof HTMLElement)) {
+        continue;
+      }
+
+      sibling.classList.add(PLAYER_FULLSCREEN_HIDDEN_CLASS);
+    }
+
+    if (parent === document.body || parent === document.documentElement) {
+      break;
+    }
+
+    child = parent;
+    parent = parent.parentElement;
+  }
 }
 
 function enterViewportFullscreen(root: HTMLElement): void {
   ensureFullscreenStyle();
-  document.querySelectorAll(`.${PLAYER_FULLSCREEN_CLASS}`).forEach((active) => active.classList.remove(PLAYER_FULLSCREEN_CLASS));
-  clearFullscreenAncestors();
-  markFullscreenAncestors(root);
+
+  document.querySelectorAll(`.${PLAYER_FULLSCREEN_CLASS}`).forEach((active) => {
+    active.classList.remove(PLAYER_FULLSCREEN_CLASS);
+  });
+  clearFullscreenIsolation();
+
+  // Hide every sibling outside the exact player ancestor chain. This prevents page UI
+  // such as YouTube's recommendation rail or Netflix overlays from remaining above the
+  // expanded player while leaving the site's own player DOM untouched.
+  isolatePlayerPath(root);
+
   document.documentElement.classList.add(PLAYER_FULLSCREEN_ROOT_CLASS);
   document.body?.classList.add(PLAYER_FULLSCREEN_ROOT_CLASS);
   root.classList.add(PLAYER_FULLSCREEN_CLASS);
 
-  // Give site-owned player layout code a chance to recalculate inside the new viewport-sized shell.
+  // Give site-owned player layout code a chance to recalculate inside the viewport-sized shell.
   window.dispatchEvent(new Event("resize"));
   window.setTimeout(() => window.dispatchEvent(new Event("resize")), 100);
+  window.setTimeout(() => window.dispatchEvent(new Event("resize")), 300);
 }
 
 function exitViewportFullscreen(): boolean {
   const active = document.querySelector<HTMLElement>(`.${PLAYER_FULLSCREEN_CLASS}`);
   active?.classList.remove(PLAYER_FULLSCREEN_CLASS);
-  clearFullscreenAncestors();
+  clearFullscreenIsolation();
   document.documentElement.classList.remove(PLAYER_FULLSCREEN_ROOT_CLASS);
   document.body?.classList.remove(PLAYER_FULLSCREEN_ROOT_CLASS);
   window.dispatchEvent(new Event("resize"));
