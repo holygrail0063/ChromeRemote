@@ -41,7 +41,7 @@ jobs:
       - name: Add installation instructions
         run: |
           cat > dist/INSTALL.txt <<'EOF'
-          ChromeRemote v1.8.0 - Installation & Use
+          ChromeRemote v1.9.0 - Installation & Use
           =========================================
 
           INSTALL ON YOUR COMPUTER
@@ -66,10 +66,9 @@ jobs:
           CHROME-WIDE SESSION
           - One QR pairs the phone to the ChromeRemote extension session.
           - Commands are routed to the currently active Netflix or YouTube tab.
-          - Switching between a Netflix tab and a YouTube tab does not require another QR or reconnect.
+          - Switching between Netflix and YouTube does not require another QR.
+          - The phone now requests fresh player state every 500 ms while connected, so transient tab/player loading states recover without manually refreshing the phone page.
           - If an unsupported tab is active, playback controls wait until Chrome is switched back to Netflix or YouTube.
-          - Player state is pushed immediately when the active tab changes.
-          - Desktop state polling starts as soon as the extension authenticates, avoiding the Netflix phone-page refresh race from older builds.
 
           PHONE CONTROLS
           - Play / Pause
@@ -83,15 +82,17 @@ jobs:
           - Volume controls
           - Playback speeds: 0.5x, 0.75x, 1x, 1.25x, 1.5x
 
-          NETFLIX CONTROLS
-          - Next Episode first uses the visible Netflix next-episode control when available.
-          - If it is not visible yet, ChromeRemote safely advances Netflix to the end through Netflix's own player-session seek API, then presses the real Next Episode control as soon as Netflix renders it.
-          - Netflix's M7375-safe seek implementation is preserved. ChromeRemote never writes video.currentTime on Netflix.
+          NETFLIX NEXT EPISODE
+          - ChromeRemote first uses Netflix's own active player-session playNextEpisode action when available.
+          - It falls back to Netflix's real rendered Next Episode control.
+          - ChromeRemote no longer seeks the current episode to the end to reveal the button. This avoids the black post-play frame regression seen in v1.8.0.
+          - Netflix's M7375-safe normal seek implementation remains unchanged.
 
           FULLSCREEN
-          - Phone fullscreen is player-only fullscreen, not Chrome's F11-style browser-window fullscreen.
+          - Phone fullscreen is player-only viewport mode, not Chrome's F11-style browser-window fullscreen.
           - ChromeRemote does not call YouTube or Netflix native fullscreen from the phone because Chrome requires a trusted local click.
-          - ChromeRemote now targets the actual playing video element, removes ancestor clipping/stacking constraints, adds a black backdrop, and pins the video to the entire browser viewport.
+          - v1.9.0 expands the site's own player shell instead of moving or fixing the raw video element.
+          - No separate black overlay is placed over the video.
           - Exit Fullscreen restores the normal page layout.
           - The Chrome tab/address bar can remain visible because true browser fullscreen requires a trusted click or F11.
 
@@ -139,5 +140,5 @@ jobs:
             gh release create "$TAG" ChromeRemote-Extension.zip \
               --target "$GITHUB_SHA" \
               --title "$TITLE" \
-              --notes "ChromeRemote v1.8.0 introduces one Chrome-wide phone session that follows the active Netflix or YouTube tab, removes the tab-bound pairedTabId architecture, starts desktop state delivery immediately to eliminate the Netflix phone-refresh pairing race, and rebuilds player-only fullscreen around the actual video element with a black viewport overlay. Netflix M7375-safe seeking and existing YouTube search/audio controls are preserved."
+              --notes "ChromeRemote v1.9.0 is a reliability release. Fullscreen now expands the site-owned player shell instead of the raw video element or a black overlay. Netflix Next Episode no longer seeks to the end and instead uses Netflix's player-session next-episode action with rendered-control fallback. The phone remote keeps a 500 ms active-state watchdog so Netflix/YouTube tab switching recovers without manual phone refreshes. Chrome-wide pairing, Netflix M7375-safe seeking, YouTube search/browsing, and YouTube audio controls are preserved."
           fi
