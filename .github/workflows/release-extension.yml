@@ -41,7 +41,7 @@ jobs:
       - name: Add installation instructions
         run: |
           cat > dist/INSTALL.txt <<'EOF'
-          ChromeRemote v1.9.0 - Installation & Use
+          ChromeRemote v1.9.1 - Installation & Use
           =========================================
 
           INSTALL ON YOUR COMPUTER
@@ -67,7 +67,7 @@ jobs:
           - One QR pairs the phone to the ChromeRemote extension session.
           - Commands are routed to the currently active Netflix or YouTube tab.
           - Switching between Netflix and YouTube does not require another QR.
-          - The phone now requests fresh player state every 500 ms while connected, so transient tab/player loading states recover without manually refreshing the phone page.
+          - The phone requests fresh player state every 500 ms while connected so transient tab/player loading states recover without manually refreshing the phone page.
           - If an unsupported tab is active, playback controls wait until Chrome is switched back to Netflix or YouTube.
 
           PHONE CONTROLS
@@ -85,16 +85,17 @@ jobs:
           NETFLIX NEXT EPISODE
           - ChromeRemote first uses Netflix's own active player-session playNextEpisode action when available.
           - It falls back to Netflix's real rendered Next Episode control.
-          - ChromeRemote no longer seeks the current episode to the end to reveal the button. This avoids the black post-play frame regression seen in v1.8.0.
+          - ChromeRemote does not seek the current episode to the end to reveal the button.
           - Netflix's M7375-safe normal seek implementation remains unchanged.
 
           FULLSCREEN
           - Phone fullscreen is player-only viewport mode, not Chrome's F11-style browser-window fullscreen.
           - ChromeRemote does not call YouTube or Netflix native fullscreen from the phone because Chrome requires a trusted local click.
-          - v1.9.0 expands the site's own player shell instead of moving or fixing the raw video element.
-          - No separate black overlay is placed over the video.
-          - Exit Fullscreen restores the normal page layout.
-          - The Chrome tab/address bar can remain visible because true browser fullscreen requires a trusted click or F11.
+          - v1.9.1 keeps the site's own player DOM intact and isolates its ancestor path from the rest of the webpage.
+          - Sibling page UI such as YouTube's recommendation rail is hidden while player fullscreen is active.
+          - The actual video element is not moved out of the site's player hierarchy and no separate black overlay is placed over it.
+          - Exit Fullscreen removes the isolation classes and restores the normal page layout.
+          - Chrome's own tab/address bar can remain visible because true browser fullscreen requires a trusted click or F11.
 
           YOUTUBE AUDIO
           - Mute / Unmute uses YouTube's own player API instead of only changing the raw video element.
@@ -140,5 +141,5 @@ jobs:
             gh release create "$TAG" ChromeRemote-Extension.zip \
               --target "$GITHUB_SHA" \
               --title "$TITLE" \
-              --notes "ChromeRemote v1.9.0 is a reliability release. Fullscreen now expands the site-owned player shell instead of the raw video element or a black overlay. Netflix Next Episode no longer seeks to the end and instead uses Netflix's player-session next-episode action with rendered-control fallback. The phone remote keeps a 500 ms active-state watchdog so Netflix/YouTube tab switching recovers without manual phone refreshes. Chrome-wide pairing, Netflix M7375-safe seeking, YouTube search/browsing, and YouTube audio controls are preserved."
+              --notes "ChromeRemote v1.9.1 fixes player-only fullscreen by isolating the site's real player ancestor path from surrounding webpage UI instead of only enlarging the player shell. YouTube recommendation/sidebar content is hidden during fullscreen, the video remains inside the site's own rendering hierarchy, and Netflix uses the same isolation strategy with a defensive player-root fallback. Chrome-wide pairing, active phone state sync, non-destructive Netflix Next Episode, M7375-safe seeking, YouTube search/browsing, and YouTube audio controls are preserved."
           fi

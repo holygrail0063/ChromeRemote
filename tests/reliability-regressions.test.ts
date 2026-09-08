@@ -6,12 +6,17 @@ function source(path: string): string {
   return readFileSync(path, "utf8");
 }
 
-test("player-only fullscreen expands site player shells instead of the raw video element", () => {
+test("player-only fullscreen isolates the site player from surrounding page UI", () => {
   const fullscreen = source("src/content/player-fullscreen.ts");
 
   assert.match(fullscreen, /getYouTubePlayerRoot/);
   assert.match(fullscreen, /#movie_player, \.html5-video-player/);
   assert.match(fullscreen, /getNetflixPlayerRoot/);
+  assert.match(fullscreen, /findNearestLargeAncestor/);
+  assert.match(fullscreen, /PLAYER_FULLSCREEN_HIDDEN_CLASS/);
+  assert.match(fullscreen, /isolatePlayerPath\(root\)/);
+  assert.match(fullscreen, /sibling\.classList\.add\(PLAYER_FULLSCREEN_HIDDEN_CLASS\)/);
+  assert.match(fullscreen, /clearFullscreenIsolation/);
   assert.match(fullscreen, /enterViewportFullscreen\(root\)/);
   assert.doesNotMatch(fullscreen, /PLAYER_FULLSCREEN_OVERLAY_ID/);
   assert.doesNotMatch(fullscreen, /video\.\$\{PLAYER_FULLSCREEN_CLASS\}/);
