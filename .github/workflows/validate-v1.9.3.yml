@@ -1,0 +1,98 @@
+name: Validate ChromeRemote v1.9.3
+
+on:
+  push:
+    branches:
+      - hotfix/v1.9.3-self-healing-tabs
+    paths:
+      - ".github/workflows/validate-v1.9.3.yml"
+      - "src/**"
+      - "remote/**"
+      - "server/**"
+      - "public/**"
+      - "scripts/**"
+      - "tests/**"
+      - "package.json"
+      - "package-lock.json"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out hotfix branch
+        uses: actions/checkout@v4
+        with:
+          ref: hotfix/v1.9.3-self-healing-tabs
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Sync package version
+        run: npm version 1.9.3 --no-git-tag-version --allow-same-version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type and lint checks
+        run: npm run lint
+
+      - name: Build production extension
+        run: npm run build:extension:production
+
+      - name: Build Railway phone and relay app
+        run: npm run build:railway
+
+      - name: Run full automated tests
+        run: npm test
+
+      - name: Verify self-healing tab recovery
+        run: |
+          grep -q 'import "./tab-recovery"' src/background/entry.ts
+          grep -q 'src/background/entry.ts' scripts/build-extension.mjs
+          grep -q 'chrome.scripting.executeScript' src/background/tab-recovery.ts
+          grep -q 'files: \["assets/content.js"\]' src/background/tab-recovery.ts
+          grep -q 'world: "ISOLATED"' src/background/tab-recovery.ts
+          grep -q 'chrome.tabs.onActivated' src/background/tab-recovery.ts
+          grep -q 'chrome.tabs.onUpdated' src/background/tab-recovery.ts
+          grep -q '"scripting"' public/manifest.json
+          ! grep -q 'netflix-adapter.js' src/background/tab-recovery.ts
+          ! grep -q 'world: "MAIN"' src/background/tab-recovery.ts
+
+      - name: Verify YouTube browser-level F hotkey remains intact
+        run: |
+          grep -q 'chrome.debugger.attach' src/background/youtube-hotkey.ts
+          grep -q 'Input.dispatchKeyEvent' src/background/youtube-hotkey.ts
+          grep -q 'key: "f"' src/background/youtube-hotkey.ts
+          grep -q 'code: "KeyF"' src/background/youtube-hotkey.ts
+          grep -q 'chrome.debugger.detach' src/background/youtube-hotkey.ts
+          grep -q '"debugger"' public/manifest.json
+
+      - name: Verify Netflix protections remain intact
+        run: |
+          grep -q 'playNextEpisode' src/netflix/next-episode.ts
+          ! grep -q '\.seek(' src/netflix/next-episode.ts
+          node scripts/verify-extension-build.mjs
+
+      - name: Verify Chrome-wide routing and phone sync remain intact
+        run: |
+          grep -q 'lastFocusedWindow: true' src/background/background.ts
+          grep -q 'chrome.tabs.onActivated' src/background/background.ts
+          grep -q 'stateSyncIntervalMs = 500' remote/src/socket.ts
+          ! grep -q 'storedPairing.pairedTabId' src/background/background.ts
+
+      - name: Commit synced package metadata
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Sync package metadata for v1.9.3"
+          git push origin HEAD:hotfix/v1.9.3-self-healing-tabs
