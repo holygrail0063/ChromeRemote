@@ -2,7 +2,9 @@
 
 ChromeRemote turns your phone into a remote control for Netflix and YouTube playing in desktop Chrome.
 
-Starting with **v1.8.0**, the phone pairs to **ChromeRemote itself**, not to one specific Netflix or YouTube tab. Pair once, then switch between supported tabs in Chrome and the phone remote follows whichever supported tab is currently active.
+Since **v1.8.0**, the phone pairs to **ChromeRemote itself**, not to one specific Netflix or YouTube tab. Pair once, then switch between supported tabs in Chrome and the phone remote follows whichever supported tab is active.
+
+**v1.9.0** is a reliability release focused on three areas: fullscreen rendering, Netflix Next Episode behavior, and phone state synchronization when switching between Netflix and YouTube.
 
 The Chrome extension stays on the computer, creates a temporary authenticated session, and shows a QR code. Your phone scans that QR code, connects to the same session, and becomes the remote.
 
@@ -73,9 +75,7 @@ Then open `chrome://extensions`, enable **Developer mode**, choose **Load unpack
 
 ## 1. Pair your phone once
 
-You can create the phone session from the ChromeRemote extension popup.
-
-Click:
+Open the ChromeRemote extension popup and click:
 
 ```text
 Pair Phone
@@ -114,7 +114,7 @@ Supported behavior:
 - Navigate YouTube from a watch page to search results: the same phone session remains connected.
 - Open an unsupported tab: the phone stays paired but playback controls wait until Netflix or YouTube becomes active again.
 
-You do **not** need to create another QR just because you switch between Netflix and YouTube.
+You do **not** need another QR just because you switch between Netflix and YouTube.
 
 ## 4. Start playback
 
@@ -122,13 +122,15 @@ For Netflix, open a movie or episode on a `netflix.com/watch/...` page.
 
 For YouTube, open a normal watch page such as `youtube.com/watch?v=...`.
 
-The extension background worker watches Chrome tab activation and player state changes, then pushes the active player's state to the phone.
+The extension background worker watches Chrome tab activation and player state changes, then sends the active player's state to the phone.
 
 ## 5. Control playback from the phone
 
 Once paired, the extension popup can be closed. The Manifest V3 background service worker keeps the session alive and routes commands to the active supported tab.
 
-The phone page can be refreshed and should reconnect to the same active session while the session is still valid.
+Starting with **v1.9.0**, the phone also requests a fresh player state every **500 ms** while connected. This acts as a recovery watchdog if a tab switch, Netflix route change, or temporary player-loading state causes one pushed update to be missed.
+
+The phone page can be refreshed and should reconnect to the same active session while the session is still valid, but normal tab switching should no longer require manual refreshes.
 
 ## 6. Search and browse YouTube from the phone
 
@@ -160,7 +162,7 @@ Disconnecting invalidates the temporary session so the old pairing link can no l
 
 # Chrome-wide Session Behavior
 
-ChromeRemote v1.8.0 removed the old permanent `pairedTabId` design.
+ChromeRemote removed the old permanent `pairedTabId` design in v1.8.0.
 
 The background service worker now:
 
@@ -172,7 +174,7 @@ The background service worker now:
 - retries briefly when a newly activated supported tab is still loading its content script
 - starts desktop player-state polling as soon as the extension WebSocket authenticates
 
-Starting state polling immediately also removes the older Netflix race where the phone could remain on **Connecting...** until the remote page was manually refreshed.
+The v1.9.0 phone-side state watchdog adds an independent refresh path, so the phone does not depend only on desktop-pushed state events to recover after a platform/tab switch.
 
 ---
 
@@ -182,15 +184,18 @@ Web browsers require a **trusted local user gesture** for the real Fullscreen AP
 
 ChromeRemote therefore does **not** press YouTube/Netflix's native fullscreen button and does **not** use Chrome's F11-style browser-window fullscreen.
 
-Phone **Fullscreen** now uses a player-only viewport mode:
+In v1.9.0, phone **Fullscreen** uses a player-shell viewport mode:
 
-1. ChromeRemote finds the actual visible playing `<video>` element.
-2. It removes ancestor clipping/stacking constraints that could trap the video inside the site's layout.
-3. It adds a black backdrop.
-4. It pins the video over the entire browser content viewport.
-5. **Exit Fullscreen** restores the page.
+1. ChromeRemote finds the site's own player shell that contains the visible video.
+2. It removes only ancestor clipping/transform constraints that could trap that player shell inside the page layout.
+3. It expands the site-owned player shell to the full browser content viewport.
+4. It leaves the raw `<video>` rendering element inside its original player hierarchy.
+5. It does **not** add a separate black overlay above or behind a moved video element.
+6. **Exit Fullscreen** removes the temporary player-shell classes and restores the normal page layout.
 
-Because this is intentionally not F11/browser fullscreen, Chrome's tab bar and address bar may remain visible. Hiding Chrome's own UI remotely would require browser fullscreen, which Chrome does not allow without a trusted local action.
+This design specifically avoids the v1.8.0 approach that fixed the raw video element directly and could result in a black screen on YouTube or Netflix.
+
+Because this is intentionally not F11/browser fullscreen, Chrome's tab bar and address bar may remain visible. Hiding Chrome's own UI remotely would require true browser fullscreen, which Chrome does not allow without a trusted local action.
 
 ---
 
@@ -198,12 +203,15 @@ Because this is intentionally not F11/browser fullscreen, Chrome's tab bar and a
 
 Netflix seeking must not use a direct `HTMLVideoElement.currentTime` write because that can trigger Netflix error **M7375**.
 
-ChromeRemote keeps a Netflix MAIN-world adapter and uses Netflix's internal player-session seek operation instead.
+ChromeRemote keeps a Netflix MAIN-world adapter and uses Netflix's internal player-session seek operation for normal seeking.
 
-For **Next Episode**:
+For **Next Episode** in v1.9.0:
 
-- ChromeRemote first tries the real visible Netflix next-episode control.
-- If Netflix has not rendered that control yet, ChromeRemote uses Netflix's internal M7375-safe seek path to advance to the end and activates the real Next Episode control when Netflix exposes it.
+- ChromeRemote first tries Netflix's own player-session `playNextEpisode()` action on the best available watch/active session.
+- It verifies whether Netflix transitions to another episode and can retry another eligible session if needed.
+- If the internal action is unavailable, ChromeRemote looks for Netflix's real rendered Next Episode control and activates it.
+- ChromeRemote **does not seek the current episode to its end** just to make the Next Episode button appear.
+- If Netflix exposes neither a working internal next-episode action nor a usable Next Episode control, the command fails safely without moving playback to a black post-play frame.
 
 The build verifier prevents Netflix code from introducing direct `video.currentTime` writes.
 
@@ -211,7 +219,7 @@ The build verifier prevents Netflix code from introducing direct `video.currentT
 
 # YouTube Notes
 
-YouTube uses its main `video.html5-main-video` watch-player element for playback.
+YouTube uses its main `video.html5-main-video` watch-player element for standard playback.
 
 Mute / Unmute uses YouTube's own player API when available, with YouTube's native mute control as fallback.
 
@@ -290,6 +298,8 @@ The background service worker owns:
 - tab-change player-state updates
 - player-state polling
 
+The phone remote also runs its own connected-state watchdog so it can actively request current player state instead of relying only on pushed updates.
+
 Netflix keeps its dedicated MAIN-world adapter for Netflix-specific operations. YouTube uses the main HTML5 watch-player video for standard playback controls.
 
 ---
@@ -336,20 +346,17 @@ ChromeRemote does not request `<all_urls>`, cookie access, debugger access, nati
 
 Select the extracted release folder that directly contains `manifest.json`, not the ZIP and not an extra parent folder.
 
-## The phone stays on Connecting
+## The phone stays on Connecting or does not recover after switching sites
 
-With v1.8.0, the extension starts player-state polling as soon as its desktop WebSocket authenticates. A manual phone refresh should no longer be required for Netflix.
+v1.9.0 keeps requesting active player state every 500 ms while the phone WebSocket is connected. Normal Netflix/YouTube switching should recover automatically without refreshing the phone.
 
-If the phone remains stuck:
+If it remains stuck for several seconds:
 
-1. confirm the extension popup says the phone is connected or waiting
-2. refresh the Netflix/YouTube page after updating the extension
-3. reload ChromeRemote from `chrome://extensions`
-4. create a fresh QR session
-
-## I switched from Netflix to YouTube but the remote did not change
-
-Make sure the target tab is the active tab in the Chrome window you are using. ChromeRemote follows the active supported tab in the last-focused Chrome window.
+1. confirm the extension popup still says the phone is connected
+2. confirm Netflix or YouTube is the active tab in the last-focused Chrome window
+3. refresh the Netflix/YouTube page after updating the extension
+4. reload ChromeRemote from `chrome://extensions`
+5. create a fresh QR session
 
 ## Playback controls are disabled
 
@@ -369,9 +376,30 @@ That is expected. ChromeRemote player fullscreen fills the **webpage viewport**,
 
 Sessions are stored in relay memory. A server restart or deployment clears active sessions. Create a new QR session.
 
-## Netflix controls stop responding after changing episodes
+---
 
-Wait briefly for Netflix to replace/update its player. ChromeRemote resolves the current Netflix player rather than permanently holding the original video element.
+# Automated Validation
+
+For v1.9.0 the release branch validates:
+
+```bash
+npm run lint
+npm run build:extension:production
+npm run build:railway
+npm test
+```
+
+Additional regression guards verify that:
+
+- fullscreen expands site player shells instead of fixing the raw video element
+- the v1.8.0 fullscreen overlay path is gone
+- Netflix Next Episode does not seek the current episode to the end
+- Netflix Next Episode includes internal `playNextEpisode()` and rendered-control paths
+- the phone state watchdog remains active after the first player-state message
+- Chrome-wide active-tab routing remains intact
+- Netflix's M7375-safe seek restrictions remain intact
+
+These automated checks validate the code/build invariants. Netflix and YouTube are live third-party websites with authenticated/DRM playback, so final live-site behavior should also be smoke-tested after installing the release.
 
 ---
 
