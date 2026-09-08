@@ -38,7 +38,8 @@ function routeFullscreenCommand(command: PlayerCommand): PlayerCommand {
 }
 
 const remoteWsOrigin = getRemoteWsOrigin();
-const stateSyncIntervalMs = 750;
+const stateSyncIntervalMs = 500;
+const reconnectDelaysMs = [500, 1000, 2000, 5000];
 
 export class RemoteSocket {
   private socket: WebSocket | null = null;
@@ -46,7 +47,8 @@ export class RemoteSocket {
   private reconnectTimer: number | null = null;
   private stateSyncTimer: number | null = null;
   private manuallyClosed = false;
-  private hasPlayerState = false;
+  private reconnectAttempt = 0;
+  private lastState: PlayerState | null = null;
 
   constructor(
     private readonly sessionId: string,
@@ -55,10 +57,13 @@ export class RemoteSocket {
   ) {}
 
   connect(): void {
+    if (this.socket?.readyState === WebSocket.OPEN || this.socket?.readyState === WebSocket.CONNECTING) {
+      return;
+    }
+
     this.manuallyClosed = false;
-    this.hasPlayerState = false;
     this.stopStateSync();
-    this.onSnapshot({ status: "connecting", state: null, message: "Connecting to Chrome..." });
+    this.onSnapshot({ status: "connecting", state: this.lastState, message: "Connecting to Chrome..." });
     this.socket = new WebSocket(`${remoteWsOrigin}/ws`);
 
     this.socket.addEventListener("open", () => {
@@ -69,9 +74,10 @@ export class RemoteSocket {
     this.socket.addEventListener("close", () => {
       this.socket = null;
       this.stopStateSync();
+      this.resolvePending(false);
       if (!this.manuallyClosed) {
-        this.onSnapshot({ status: "desktop-disconnected", state: null, message: "ChromeRemote disconnected." });
-        this.reconnectTimer = window.setTimeout(() => this.connect(), 2000);
+        this.onSnapshot({ status: "desktop-disconnected", state: this.lastState, message: "ChromeRemote disconnected. Reconnecting..." });
+        this.scheduleReconnect();
       }
     });
   }
@@ -79,43 +85,41 @@ export class RemoteSocket {
   disconnect(): void {
     this.manuallyClosed = true;
     this.stopStateSync();
-    if (this.reconnectTimer !== null) {
-      window.clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.clearReconnectTimer();
+    this.resolvePending(false);
     this.socket?.close();
   }
 
   endSession(): void {
     this.manuallyClosed = true;
     this.stopStateSync();
-    if (this.reconnectTimer !== null) {
-      window.clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.clearReconnectTimer();
     this.sendRaw({ type: "END_SESSION" });
   }
 
   command(command: PlayerCommand): Promise<boolean> {
+    if (this.socket?.readyState !== WebSocket.OPEN) {
+      return Promise.resolve(false);
+    }
+
     const requestId = crypto.randomUUID();
     this.sendRaw({ type: "COMMAND", requestId, command: routeFullscreenCommand(command) });
     return new Promise((resolve) => this.pending.set(requestId, resolve));
   }
 
+  requestStateNow(): void {
+    if (this.socket?.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    const requestId = `state-${crypto.randomUUID()}`;
+    this.sendRaw({ type: "COMMAND", requestId, command: { type: "GET_STATE" } });
+  }
+
   private startStateSync(): void {
     this.stopStateSync();
-
-    const requestState = () => {
-      if (this.hasPlayerState || this.socket?.readyState !== WebSocket.OPEN) {
-        this.stopStateSync();
-        return;
-      }
-
-      void this.command({ type: "GET_STATE" });
-    };
-
-    requestState();
-    this.stateSyncTimer = window.setInterval(requestState, stateSyncIntervalMs);
+    this.requestStateNow();
+    this.stateSyncTimer = window.setInterval(() => this.requestStateNow(), stateSyncIntervalMs);
   }
 
   private stopStateSync(): void {
@@ -125,66 +129,100 @@ export class RemoteSocket {
     }
   }
 
+  private scheduleReconnect(): void {
+    if (this.manuallyClosed || this.reconnectTimer !== null) {
+      return;
+    }
+
+    const delay = reconnectDelaysMs[Math.min(this.reconnectAttempt, reconnectDelaysMs.length - 1)];
+    this.reconnectAttempt += 1;
+    this.reconnectTimer = window.setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer !== null) {
+      window.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  private resolvePending(ok: boolean): void {
+    for (const resolve of this.pending.values()) {
+      resolve(ok);
+    }
+    this.pending.clear();
+  }
+
+  private snapshotFromState(state: PlayerState, message?: string): void {
+    this.lastState = state;
+    this.onSnapshot({
+      status: state.detected ? "connected" : "player-loading",
+      state,
+      message: message ?? (state.detected ? "Connected" : "Waiting for the active player...")
+    });
+  }
+
   private handleMessage(raw: string): void {
     const message = parseRemoteMessage(raw) as RemoteServerMessage;
 
     if (message.type === "AUTH_OK") {
-      this.onSnapshot({ status: "connecting", state: null, message: "Syncing player..." });
+      this.reconnectAttempt = 0;
+      this.clearReconnectTimer();
+      this.onSnapshot({ status: "connecting", state: this.lastState, message: "Syncing active player..." });
       this.startStateSync();
       return;
     }
 
     if (message.type === "AUTH_FAILED") {
       this.stopStateSync();
-      this.onSnapshot({ status: "auth-failed", state: null, message: message.message });
+      this.onSnapshot({ status: "auth-failed", state: this.lastState, message: message.message });
       this.disconnect();
       return;
     }
 
     if (message.type === "PLAYER_STATE") {
-      this.hasPlayerState = true;
-      this.stopStateSync();
-      this.onSnapshot({
-        status: message.state.detected ? "connected" : "player-loading",
-        state: message.state,
-        message: message.state.detected ? "Connected" : "Player is waiting for a video..."
-      });
+      this.snapshotFromState(message.state);
       return;
     }
 
     if (message.type === "COMMAND_RESULT") {
       this.pending.get(message.requestId)?.(message.ok);
       this.pending.delete(message.requestId);
+
+      if (message.state) {
+        this.lastState = message.state;
+      }
+
       if (!message.ok) {
         this.onSnapshot({
           status: message.errorCode === "PLAYER_UNAVAILABLE" ? "player-unavailable" : "connecting",
-          state: message.state ?? null,
+          state: message.state ?? this.lastState,
           message: message.message
         });
       } else if (message.state) {
-        this.hasPlayerState = true;
-        this.stopStateSync();
-        this.onSnapshot({ status: message.state.detected ? "connected" : "player-loading", state: message.state, message: "Connected" });
+        this.snapshotFromState(message.state, message.state.detected ? "Connected" : "Waiting for the active player...");
       }
       return;
     }
 
     if (message.type === "DESKTOP_DISCONNECTED") {
-      this.stopStateSync();
-      this.onSnapshot({ status: "desktop-disconnected", state: null, message: "ChromeRemote disconnected." });
+      this.onSnapshot({ status: "desktop-disconnected", state: this.lastState, message: "ChromeRemote desktop is reconnecting..." });
       return;
     }
 
     if (message.type === "SESSION_EXPIRED") {
       this.stopStateSync();
-      this.onSnapshot({ status: "session-expired", state: null, message: "This remote session has expired." });
+      this.onSnapshot({ status: "session-expired", state: this.lastState, message: "This remote session has expired." });
       this.disconnect();
       return;
     }
 
     if (message.type === "SESSION_ENDED") {
       this.stopStateSync();
-      this.onSnapshot({ status: "session-expired", state: null, message: "This remote session has ended." });
+      this.onSnapshot({ status: "session-expired", state: this.lastState, message: "This remote session has ended." });
       this.disconnect();
     }
   }
