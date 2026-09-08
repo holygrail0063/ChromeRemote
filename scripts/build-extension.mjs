@@ -76,7 +76,7 @@ await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 for (const entry of [
   { name: "ChromeRemoteContent", fileName: "content", path: "src/content/content.ts" },
   { name: "ChromeRemoteNetflixAdapter", fileName: "netflix-adapter", path: "src/netflix/main-world-adapter.ts" },
-  { name: "ChromeRemoteBackground", fileName: "background", path: "src/background/background.ts" }
+  { name: "ChromeRemoteBackground", fileName: "background", path: "src/background/entry.ts" }
 ]) {
   await build({
     configFile: false,
