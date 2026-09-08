@@ -14,6 +14,7 @@ import {
   type PairingState
 } from "../shared/pairing";
 import { parseRemoteMessage, toRemoteErrorCode, type RemoteServerMessage } from "../shared/remote-protocol";
+import { pressYouTubeFullscreenHotkey } from "./youtube-hotkey";
 
 type StoredPairing = {
   sessionId: string;
@@ -196,6 +197,34 @@ async function readActivePlayerState(): Promise<{ state: PlayerState; activeTabI
   return { state: unavailableState(active.site), activeTabId: active.tabId };
 }
 
+async function exitViewportFullscreenOnTab(tabId: number): Promise<void> {
+  try {
+    await chrome.tabs.sendMessage<PlayerCommand, PlayerResponse>(tabId, { type: "EXIT_PLAYER_FULLSCREEN" });
+  } catch {
+    // The previous tab may have navigated or closed; cleanup is best-effort.
+  }
+}
+
+async function sendYouTubeFullscreenHotkey(tabId: number): Promise<PlayerResponse> {
+  try {
+    // Clear any leftover ChromeRemote CSS fullscreen state from older builds before
+    // asking YouTube itself to process the same F shortcut a local user would press.
+    await exitViewportFullscreenOnTab(tabId);
+    await pressYouTubeFullscreenHotkey(tabId);
+    await delay(200);
+    const { state } = await readActivePlayerState();
+    return { ok: true, state };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "ChromeRemote could not press YouTube's fullscreen hotkey.";
+    return {
+      ok: false,
+      error: message,
+      errorCode: "PLAYER_UNAVAILABLE",
+      state: unavailableState("youtube")
+    };
+  }
+}
+
 async function sendCommandToActiveTab(command: PlayerCommand): Promise<PlayerResponse> {
   if (!storedPairing) {
     return { ok: false, error: "No active phone pairing.", errorCode: "PLAYER_UNAVAILABLE" };
@@ -214,6 +243,13 @@ async function sendCommandToActiveTab(command: PlayerCommand): Promise<PlayerRes
       errorCode: "PLAYER_UNAVAILABLE",
       state: unavailableState()
     };
+  }
+
+  if (
+    active.site === "youtube" &&
+    (command.type === "ENTER_PLAYER_FULLSCREEN" || command.type === "FULLSCREEN")
+  ) {
+    return sendYouTubeFullscreenHotkey(active.tabId);
   }
 
   try {
@@ -253,14 +289,6 @@ function startPolling(): void {
   pollingTimer = setInterval(() => {
     void pushPlayerState();
   }, stateIntervalMs) as unknown as number;
-}
-
-async function exitViewportFullscreenOnTab(tabId: number): Promise<void> {
-  try {
-    await chrome.tabs.sendMessage<PlayerCommand, PlayerResponse>(tabId, { type: "EXIT_PLAYER_FULLSCREEN" });
-  } catch {
-    // The previous tab may have navigated or closed; cleanup is best-effort.
-  }
 }
 
 async function handleActiveTabChanged(): Promise<void> {
