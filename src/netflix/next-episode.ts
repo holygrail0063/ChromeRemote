@@ -1,7 +1,5 @@
 interface NetflixPlayerSession {
-  seek?: (milliseconds: number) => void;
-  play?: () => void;
-  getDuration?: () => number;
+  playNextEpisode?: () => void;
   isActive?: () => boolean;
   isPlaying?: () => boolean;
 }
@@ -28,10 +26,17 @@ const nextEpisodeSelectors = [
   '[data-uia="next-episode-seamless-button"]',
   '.watch-video--skip-content-button',
   '.watch-video--skip-preplay-button',
+  'button[data-uia="next-episode-button"]',
+  'button[data-uia="next-episode"]',
+  'button[data-uia="player-next-episode"]',
   'button[data-uia*="next-episode" i]',
   '[role="button"][data-uia*="next-episode" i]',
   'button[aria-label*="Next Episode" i]',
-  '[role="button"][aria-label*="Next Episode" i]'
+  'button[aria-label*="Next episode" i]',
+  '[role="button"][aria-label*="Next Episode" i]',
+  '[role="button"][aria-label*="Next episode" i]',
+  'button[aria-label="Next" i]',
+  '[role="button"][aria-label="Next" i]'
 ];
 
 function delay(milliseconds: number): Promise<void> {
@@ -43,33 +48,33 @@ function getVideoPlayer(): NetflixVideoPlayer | null {
   return pageWindow.netflix?.appContext?.state?.playerApp?.getAPI?.().videoPlayer ?? null;
 }
 
-function getWatchSession(videoPlayer: NetflixVideoPlayer): NetflixPlayerSession | null {
+function orderedSessions(videoPlayer: NetflixVideoPlayer): Array<{ id: string; session: NetflixPlayerSession }> {
   const sessionIds = videoPlayer.getAllPlayerSessionIds?.();
   if (!Array.isArray(sessionIds) || sessionIds.length === 0 || !videoPlayer.getVideoPlayerBySessionId) {
-    return null;
+    return [];
   }
 
-  const watchId = sessionIds.find((id) => id.startsWith("watch-"));
-  if (watchId) {
-    const watchSession = videoPlayer.getVideoPlayerBySessionId(watchId);
-    if (watchSession) {
-      return watchSession;
-    }
-  }
+  const resolved = sessionIds
+    .map((id) => ({ id, session: videoPlayer.getVideoPlayerBySessionId?.(id) ?? null }))
+    .filter((entry): entry is { id: string; session: NetflixPlayerSession } => entry.session !== null);
 
-  const sessions = sessionIds
-    .map((id) => videoPlayer.getVideoPlayerBySessionId?.(id) ?? null)
-    .filter((session): session is NetflixPlayerSession => session !== null);
-
-  const active = sessions.find((session) => {
-    try {
-      return session.isActive?.() === true || session.isPlaying?.() === true;
-    } catch {
-      return false;
+  return resolved.sort((left, right) => {
+    const leftWatch = left.id.startsWith("watch-") ? 1 : 0;
+    const rightWatch = right.id.startsWith("watch-") ? 1 : 0;
+    if (leftWatch !== rightWatch) {
+      return rightWatch - leftWatch;
     }
+
+    const activeScore = (entry: { session: NetflixPlayerSession }): number => {
+      try {
+        return entry.session.isActive?.() === true || entry.session.isPlaying?.() === true ? 1 : 0;
+      } catch {
+        return 0;
+      }
+    };
+
+    return activeScore(right) - activeScore(left);
   });
-
-  return active ?? sessions[0] ?? null;
 }
 
 function wakeNetflixControls(): void {
@@ -118,11 +123,22 @@ function findNextEpisodeControl(): HTMLElement | null {
 }
 
 function activate(control: HTMLElement): void {
-  control.focus();
+  control.focus({ preventScroll: true });
   control.click();
 }
 
-async function waitForNextEpisode(startUrl: string, timeoutMs: number): Promise<boolean> {
+function sessionFingerprint(videoPlayer: NetflixVideoPlayer): string {
+  const ids = videoPlayer.getAllPlayerSessionIds?.();
+  return Array.isArray(ids) ? [...ids].sort().join("|") : "";
+}
+
+async function waitForTransition(
+  videoPlayer: NetflixVideoPlayer,
+  startUrl: string,
+  startVideo: HTMLVideoElement | null,
+  startSessionFingerprint: string,
+  timeoutMs: number
+): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
@@ -130,47 +146,87 @@ async function waitForNextEpisode(startUrl: string, timeoutMs: number): Promise<
       return true;
     }
 
-    const control = findNextEpisodeControl();
-    if (control) {
-      activate(control);
+    const currentVideo = document.querySelector<HTMLVideoElement>("video");
+    if (startVideo && currentVideo && currentVideo !== startVideo) {
+      return true;
+    }
+
+    const currentFingerprint = sessionFingerprint(videoPlayer);
+    if (startSessionFingerprint && currentFingerprint && currentFingerprint !== startSessionFingerprint) {
       return true;
     }
 
     await delay(100);
   }
 
-  return window.location.href !== startUrl;
+  return false;
+}
+
+async function tryInternalNextEpisode(videoPlayer: NetflixVideoPlayer): Promise<boolean> {
+  const startUrl = window.location.href;
+  const startVideo = document.querySelector<HTMLVideoElement>("video");
+  const startFingerprint = sessionFingerprint(videoPlayer);
+
+  for (const { session } of orderedSessions(videoPlayer)) {
+    if (typeof session.playNextEpisode !== "function") {
+      continue;
+    }
+
+    try {
+      session.playNextEpisode();
+    } catch {
+      continue;
+    }
+
+    if (await waitForTransition(videoPlayer, startUrl, startVideo, startFingerprint, 1800)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function tryRenderedNextEpisode(videoPlayer: NetflixVideoPlayer): Promise<boolean> {
+  const startUrl = window.location.href;
+  const startVideo = document.querySelector<HTMLVideoElement>("video");
+  const startFingerprint = sessionFingerprint(videoPlayer);
+  const deadline = Date.now() + 1500;
+
+  while (Date.now() < deadline) {
+    const control = findNextEpisodeControl();
+    if (control) {
+      activate(control);
+      if (await waitForTransition(videoPlayer, startUrl, startVideo, startFingerprint, 1800)) {
+        return true;
+      }
+
+      // Netflix can reuse the same URL/session briefly after accepting the click. Treat a
+      // successful rendered-control activation as accepted rather than seeking to the end.
+      return true;
+    }
+
+    await delay(100);
+  }
+
+  return false;
 }
 
 export async function advanceNetflixEpisode(): Promise<void> {
-  const immediateControl = findNextEpisodeControl();
-  if (immediateControl) {
-    activate(immediateControl);
-    return;
-  }
-
   const videoPlayer = getVideoPlayer();
-  const session = videoPlayer ? getWatchSession(videoPlayer) : null;
-  const durationMs = session?.getDuration?.();
-
-  if (!session?.seek || !Number.isFinite(durationMs) || (durationMs as number) <= 1000) {
+  if (!videoPlayer) {
     throw new Error("Netflix next episode is not available right now.");
   }
 
-  const startUrl = window.location.href;
-
-  // Netflix's own player-session seek is required here. Writing video.currentTime directly
-  // can trigger Netflix M7375, so advance to the end through the same safe internal API.
-  session.seek(Math.max(0, (durationMs as number) - 500));
-  try {
-    session.play?.();
-  } catch {
-    // The end-card can still render while paused, so continue polling.
-  }
-
-  if (await waitForNextEpisode(startUrl, 5000)) {
+  // Never force an episode to its end to reveal the next button. That can leave Netflix on
+  // a black post-play frame when the UI does not transition. Prefer Netflix's own player
+  // session command, then the real rendered Next Episode control.
+  if (await tryInternalNextEpisode(videoPlayer)) {
     return;
   }
 
-  throw new Error("Netflix did not expose the next episode control after advancing to the end.");
+  if (await tryRenderedNextEpisode(videoPlayer)) {
+    return;
+  }
+
+  throw new Error("Netflix did not expose a usable next episode action.");
 }
