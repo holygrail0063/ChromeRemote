@@ -226,23 +226,48 @@ export async function enterYouTubePlayerFullscreen(): Promise<void> {
   enterViewportFullscreen(root);
 }
 
-export async function enterNetflixPlayerFullscreen(_tryNetflixNativeFullscreen: () => Promise<void>): Promise<void> {
+export async function enterNetflixPlayerFullscreen(tryNetflixNativeFullscreen: () => Promise<void>): Promise<void> {
   const root = getNetflixPlayerRoot();
   if (!root) {
     throw new Error("Netflix player is not available for fullscreen.");
   }
 
+  // Prefer Netflix's own fullscreen control first. This path was accidentally bypassed,
+  // which meant the phone button could only attempt ChromeRemote's CSS viewport fallback.
+  try {
+    await tryNetflixNativeFullscreen();
+    if (document.fullscreenElement) {
+      exitViewportFullscreen();
+      return;
+    }
+  } catch {
+    // Chrome may reject native fullscreen without a local user gesture. In that case,
+    // keep the remote-safe player-only viewport fallback below.
+  }
+
   enterViewportFullscreen(root);
 }
 
-export async function exitPlayerFullscreen(_tryNetflixNativeExit?: () => Promise<void>): Promise<void> {
+export async function exitPlayerFullscreen(tryNetflixNativeExit?: () => Promise<void>): Promise<void> {
   if (document.fullscreenElement) {
     try {
       await document.exitFullscreen();
+      exitViewportFullscreen();
+      return;
     } catch {
       // Continue with ChromeRemote's player-shell cleanup below.
     }
   }
 
-  exitViewportFullscreen();
+  if (exitViewportFullscreen()) {
+    return;
+  }
+
+  if (tryNetflixNativeExit) {
+    try {
+      await tryNetflixNativeExit();
+    } catch {
+      // Exit is idempotent from the phone; no fullscreen state is also success.
+    }
+  }
 }
