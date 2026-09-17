@@ -40,6 +40,9 @@ export type RemoteServerMessage =
   | { type: "PONG" };
 
 export const MAX_REMOTE_MESSAGE_BYTES = 16 * 1024;
+const MAX_AUTH_FIELD_LENGTH = 128;
+const MAX_REQUEST_ID_LENGTH = 128;
+const safeAuthFieldPattern = /^[A-Za-z0-9_-]+$/;
 
 const REMOTE_COMMAND_TYPES = new Set<PlayerCommand["type"]>([
   "GET_STATE",
@@ -60,6 +63,19 @@ const REMOTE_COMMAND_TYPES = new Set<PlayerCommand["type"]>([
   "YOUTUBE_NEXT_RESULT",
   "YOUTUBE_OPEN_SELECTED_RESULT"
 ]);
+
+function isSafeAuthField(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= 8 &&
+    value.length <= MAX_AUTH_FIELD_LENGTH &&
+    safeAuthFieldPattern.test(value)
+  );
+}
+
+function isSafeRequestId(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= MAX_REQUEST_ID_LENGTH;
+}
 
 export function isRemoteCommand(command: unknown): command is PlayerCommand {
   if (!isPlayerCommand(command)) {
@@ -91,13 +107,13 @@ export function isRemoteClientMessage(message: unknown): message is RemoteClient
   if (candidate.type === "AUTH") {
     return (
       (candidate.role === "player" || candidate.role === "controller") &&
-      typeof candidate.sessionId === "string" &&
-      typeof candidate.token === "string"
+      isSafeAuthField(candidate.sessionId) &&
+      isSafeAuthField(candidate.token)
     );
   }
 
   if (candidate.type === "COMMAND") {
-    return typeof candidate.requestId === "string" && isRemoteCommand(candidate.command);
+    return isSafeRequestId(candidate.requestId) && isRemoteCommand(candidate.command);
   }
 
   if (candidate.type === "PLAYER_STATE") {
@@ -105,7 +121,7 @@ export function isRemoteClientMessage(message: unknown): message is RemoteClient
   }
 
   if (candidate.type === "COMMAND_RESULT") {
-    if (typeof candidate.requestId !== "string" || typeof candidate.ok !== "boolean") {
+    if (!isSafeRequestId(candidate.requestId) || typeof candidate.ok !== "boolean") {
       return false;
     }
 

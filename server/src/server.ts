@@ -1,9 +1,19 @@
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
-import { dirname, extname, join, normalize, resolve } from "node:path";
+import { dirname, extname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createSession, invalidateSession } from "./sessions.js";
+import {
+  createSession,
+  getActiveSessionCount,
+  MAX_ACTIVE_SESSIONS,
+  sweepExpiredSessions
+} from "./sessions.js";
+import {
+  consumeSessionCreationAttempt,
+  getClientIp,
+  safeDecodePathname
+} from "./security.js";
 import { handleUpgrade } from "./websocket.js";
 
 const port = Number(process.env.PORT ?? 8787);
@@ -19,6 +29,7 @@ function isProductionRuntime(): boolean {
 }
 
 const publicOrigin = (process.env.PUBLIC_ORIGIN ?? (isProductionRuntime() ? productionPublicOrigin : developmentPublicOrigin)).replace(/\/$/, "");
+const webSocketOrigin = publicOrigin.replace(/^https:/, "wss:").replace(/^http:/, "ws:");
 const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? publicOrigin)
   .split(",")
   .map((origin) => origin.trim())
@@ -72,26 +83,64 @@ function getRequestPublicOrigin(request: import("node:http").IncomingMessage): s
 
 function baseHeaders(request: import("node:http").IncomingMessage): Record<string, string> {
   const corsOrigin = getCorsOrigin(request);
+  const contentSecurityPolicy = [
+    "default-src 'self'",
+    "base-uri 'none'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "form-action 'none'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "img-src 'self' data: blob:",
+    "media-src 'self' blob:",
+    `connect-src 'self' ${webSocketOrigin}`
+  ].join("; ");
 
   return {
     ...(corsOrigin ? { "access-control-allow-origin": corsOrigin, vary: "Origin" } : {}),
-    "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
-    "access-control-allow-headers": "content-type"
+    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-headers": "content-type",
+    "content-security-policy": contentSecurityPolicy,
+    "permissions-policy": "camera=(self), microphone=(), geolocation=()",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    ...(isProductionRuntime() ? { "strict-transport-security": "max-age=31536000; includeSubDomains" } : {})
   };
 }
 
-function sendJson(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse, statusCode: number, body: unknown): void {
+function sendJson(
+  request: import("node:http").IncomingMessage,
+  response: import("node:http").ServerResponse,
+  statusCode: number,
+  body: unknown
+): void {
   response.writeHead(statusCode, {
     ...baseHeaders(request),
+    "cache-control": "no-store",
     "content-type": "application/json; charset=utf-8"
   });
   response.end(JSON.stringify(body));
 }
 
+function hasUnexpectedRequestBody(request: import("node:http").IncomingMessage): boolean {
+  if (request.headers["transfer-encoding"] !== undefined) {
+    return true;
+  }
+
+  const contentLength = request.headers["content-length"];
+  if (typeof contentLength !== "string") {
+    return false;
+  }
+
+  const parsedLength = Number(contentLength);
+  return !Number.isFinite(parsedLength) || parsedLength > 0;
+}
+
 async function getStaticRoot(): Promise<string | null> {
   for (const candidate of staticCandidates) {
     try {
-      const indexPath = join(candidate, "index.html");
+      const indexPath = resolve(candidate, "index.html");
       if ((await stat(candidate)).isDirectory() && (await stat(indexPath)).isFile()) {
         return candidate;
       }
@@ -110,9 +159,10 @@ async function serveStaticFile(
   routePath: string
 ): Promise<boolean> {
   const relativePath = routePath.replace(/^\/+/, "");
-  const filePath = normalize(join(staticRoot, relativePath));
+  const filePath = resolve(staticRoot, relativePath);
+  const relativeToRoot = relative(staticRoot, filePath);
 
-  if (!filePath.startsWith(staticRoot)) {
+  if (relativeToRoot.startsWith("..") || isAbsolute(relativeToRoot)) {
     sendJson(request, response, 403, { ok: false });
     return true;
   }
@@ -141,13 +191,15 @@ async function serveStaticFile(
   }
 }
 
-async function serveSpaApp(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse): Promise<boolean> {
+async function serveSpaApp(
+  request: import("node:http").IncomingMessage,
+  response: import("node:http").ServerResponse,
+  pathname: string
+): Promise<boolean> {
   if (request.method !== "GET" && request.method !== "HEAD") {
     return false;
   }
 
-  const requestUrl = new URL(request.url ?? "/", publicOrigin);
-  const pathname = decodeURIComponent(requestUrl.pathname);
   if (!spaRoutes.has(pathname) && !pathname.startsWith("/r/")) {
     return false;
   }
@@ -156,38 +208,72 @@ async function serveSpaApp(request: import("node:http").IncomingMessage, respons
   return staticRoot ? serveStaticFile(request, response, staticRoot, "index.html") : false;
 }
 
-async function serveStatic(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse): Promise<boolean> {
+async function serveStatic(
+  request: import("node:http").IncomingMessage,
+  response: import("node:http").ServerResponse,
+  pathname: string
+): Promise<boolean> {
   if (request.method !== "GET" && request.method !== "HEAD") {
     return false;
   }
 
   const staticRoot = await getStaticRoot();
-  if (!staticRoot) {
-    return false;
-  }
-
-  const requestUrl = new URL(request.url ?? "/", publicOrigin);
-  const pathname = decodeURIComponent(requestUrl.pathname);
-  return serveStaticFile(request, response, staticRoot, pathname);
+  return staticRoot ? serveStaticFile(request, response, staticRoot, pathname) : false;
 }
 
 const server = createServer((request, response) => {
-  void handleRequest(request, response);
+  void handleRequest(request, response).catch((error) => {
+    console.error("Unhandled ChromeRemote HTTP request error:", error instanceof Error ? error.message : "unknown error");
+    if (!response.headersSent) {
+      try {
+        sendJson(request, response, 500, { ok: false });
+      } catch {
+        response.destroy();
+      }
+    } else {
+      response.destroy();
+    }
+  });
 });
 
-async function handleRequest(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse): Promise<void> {
+async function handleRequest(
+  request: import("node:http").IncomingMessage,
+  response: import("node:http").ServerResponse
+): Promise<void> {
   if (request.method === "OPTIONS") {
     response.writeHead(204, baseHeaders(request));
     response.end();
     return;
   }
 
-  if (request.method === "GET" && request.url === "/health") {
+  const pathname = safeDecodePathname(request.url, publicOrigin);
+  if (pathname === null) {
+    sendJson(request, response, 400, { ok: false });
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/health") {
     sendJson(request, response, 200, { ok: true, service: "chromeremote" });
     return;
   }
 
-  if (request.method === "POST" && request.url === "/api/sessions") {
+  if (request.method === "POST" && pathname === "/api/sessions") {
+    if (hasUnexpectedRequestBody(request)) {
+      sendJson(request, response, 413, { ok: false, errorCode: "INVALID_REQUEST", message: "Request body is not allowed." });
+      return;
+    }
+
+    if (!consumeSessionCreationAttempt(getClientIp(request))) {
+      sendJson(request, response, 429, { ok: false, errorCode: "RATE_LIMITED", message: "Too many pairing attempts." });
+      return;
+    }
+
+    sweepExpiredSessions();
+    if (getActiveSessionCount() >= MAX_ACTIVE_SESSIONS) {
+      sendJson(request, response, 503, { ok: false, errorCode: "SESSION_CAPACITY_REACHED", message: "ChromeRemote is temporarily at capacity." });
+      return;
+    }
+
     try {
       const productionRuntime = isProductionRuntime();
       sendJson(
@@ -210,22 +296,18 @@ async function handleRequest(request: import("node:http").IncomingMessage, respo
     return;
   }
 
-  const deleteMatch = request.url?.match(/^\/api\/sessions\/([^/]+)$/);
-  if (request.method === "DELETE" && deleteMatch) {
-    sendJson(request, response, invalidateSession(decodeURIComponent(deleteMatch[1])) ? 200 : 404, { ok: true });
-    return;
-  }
-
-  if (request.url?.startsWith("/api/")) {
+  // Session invalidation is intentionally performed by an authenticated controller
+  // over the WebSocket END_SESSION command. Do not expose session-id-only deletion.
+  if (pathname.startsWith("/api/")) {
     sendJson(request, response, 404, { ok: false });
     return;
   }
 
-  if (await serveSpaApp(request, response)) {
+  if (await serveSpaApp(request, response, pathname)) {
     return;
   }
 
-  if (await serveStatic(request, response)) {
+  if (await serveStatic(request, response, pathname)) {
     return;
   }
 
@@ -233,6 +315,16 @@ async function handleRequest(request: import("node:http").IncomingMessage, respo
 }
 
 server.on("upgrade", handleUpgrade);
+server.requestTimeout = 15_000;
+server.headersTimeout = 10_000;
+server.keepAliveTimeout = 5_000;
+server.maxHeadersCount = 100;
+server.maxConnections = 500;
+
+const sessionSweepTimer = setInterval(() => {
+  sweepExpiredSessions();
+}, 60_000);
+sessionSweepTimer.unref();
 
 const startupStaticRoot = await getStaticRoot();
 if (!startupStaticRoot) {

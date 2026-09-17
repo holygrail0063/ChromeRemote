@@ -10,7 +10,12 @@ import {
   type RemoteSession,
   type SessionConnection
 } from "./sessions.js";
-import { isRemoteClientMessage, parseRemoteMessage } from "../../src/shared/remote-protocol.js";
+import { getClientIp } from "./security.js";
+import {
+  isRemoteClientMessage,
+  MAX_REMOTE_MESSAGE_BYTES,
+  parseRemoteMessage
+} from "../../src/shared/remote-protocol.js";
 
 type ClientContext = {
   connection: SessionConnection;
@@ -19,45 +24,166 @@ type ClientContext = {
   role: "player" | "controller" | null;
 };
 
-function writeFrame(socket: Socket, payload: string): void {
-  const data = Buffer.from(payload);
-  const length = data.length;
+type DecodedFrames = {
+  messages: string[];
+  pings: Buffer[];
+  remaining: Buffer<ArrayBufferLike>;
+};
+
+const MAX_SOCKET_BUFFER_BYTES = 64 * 1024;
+const MAX_FRAMES_PER_READ = 64;
+const MAX_TOTAL_WEBSOCKET_CONNECTIONS = 200;
+const MAX_WEBSOCKET_CONNECTIONS_PER_CLIENT = 20;
+const AUTH_TIMEOUT_MS = 5000;
+
+let activeWebSocketConnections = 0;
+const activeConnectionsByClient = new Map<string, number>();
+
+function configuredAllowedOrigins(): string[] {
+  const publicOrigin = (process.env.PUBLIC_ORIGIN ?? "http://localhost:8787").replace(/\/$/, "");
+  return (process.env.ALLOWED_ORIGINS ?? publicOrigin)
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
+export function isAllowedWebSocketOrigin(origin: string | undefined, allowedOrigins = configuredAllowedOrigins()): boolean {
+  // Browsers send Origin. Allowing a missing Origin keeps non-browser/local development
+  // clients compatible, while still blocking cross-site browser WebSocket attempts.
+  if (!origin) {
+    return true;
+  }
+
+  return origin.startsWith("chrome-extension://") || allowedOrigins.includes(origin);
+}
+
+function headerIncludesToken(value: string | string[] | undefined, expected: string): boolean {
+  const raw = Array.isArray(value) ? value.join(",") : value ?? "";
+  return raw
+    .split(",")
+    .map((token) => token.trim().toLowerCase())
+    .includes(expected.toLowerCase());
+}
+
+function isValidWebSocketKey(value: string | undefined): value is string {
+  if (!value) {
+    return false;
+  }
+
+  try {
+    return Buffer.from(value, "base64").length === 16;
+  } catch {
+    return false;
+  }
+}
+
+function writeServerFrame(socket: Socket, opcode: number, payload: Buffer): void {
+  const length = payload.length;
   let header: Buffer;
 
   if (length < 126) {
-    header = Buffer.from([0x81, length]);
+    header = Buffer.from([0x80 | opcode, length]);
   } else if (length < 65536) {
     header = Buffer.alloc(4);
-    header[0] = 0x81;
+    header[0] = 0x80 | opcode;
     header[1] = 126;
     header.writeUInt16BE(length, 2);
   } else {
     header = Buffer.alloc(10);
-    header[0] = 0x81;
+    header[0] = 0x80 | opcode;
     header[1] = 127;
     header.writeBigUInt64BE(BigInt(length), 2);
   }
 
-  socket.write(Buffer.concat([header, data]));
+  socket.write(Buffer.concat([header, payload]));
+}
+
+function writeFrame(socket: Socket, payload: string): void {
+  writeServerFrame(socket, 0x1, Buffer.from(payload));
 }
 
 function closeSocket(socket: Socket): void {
-  if (!socket.destroyed) {
-    socket.end(Buffer.from([0x88, 0x00]));
+  if (socket.destroyed) {
+    return;
+  }
+
+  try {
+    writeServerFrame(socket, 0x8, Buffer.alloc(0));
+    socket.end();
+  } catch {
+    socket.destroy();
   }
 }
 
-function decodeFrames(buffer: Buffer<ArrayBufferLike>): { messages: string[]; remaining: Buffer<ArrayBufferLike> } {
+function rejectUpgrade(socket: Socket, statusCode: number, statusText: string): void {
+  if (socket.destroyed) {
+    return;
+  }
+
+  socket.end(
+    [
+      `HTTP/1.1 ${statusCode} ${statusText}`,
+      "Connection: close",
+      "Content-Length: 0",
+      "Cache-Control: no-store",
+      "",
+      ""
+    ].join("\r\n")
+  );
+}
+
+function reserveConnection(clientKey: string): boolean {
+  const clientConnections = activeConnectionsByClient.get(clientKey) ?? 0;
+  if (
+    activeWebSocketConnections >= MAX_TOTAL_WEBSOCKET_CONNECTIONS ||
+    clientConnections >= MAX_WEBSOCKET_CONNECTIONS_PER_CLIENT
+  ) {
+    return false;
+  }
+
+  activeWebSocketConnections += 1;
+  activeConnectionsByClient.set(clientKey, clientConnections + 1);
+  return true;
+}
+
+function releaseConnection(clientKey: string): void {
+  activeWebSocketConnections = Math.max(0, activeWebSocketConnections - 1);
+  const nextClientConnections = Math.max(0, (activeConnectionsByClient.get(clientKey) ?? 1) - 1);
+  if (nextClientConnections === 0) {
+    activeConnectionsByClient.delete(clientKey);
+  } else {
+    activeConnectionsByClient.set(clientKey, nextClientConnections);
+  }
+}
+
+export function decodeFrames(buffer: Buffer<ArrayBufferLike>): DecodedFrames {
   const messages: string[] = [];
+  const pings: Buffer[] = [];
   let offset = 0;
+  let frameCount = 0;
 
   while (offset + 2 <= buffer.length) {
+    frameCount += 1;
+    if (frameCount > MAX_FRAMES_PER_READ) {
+      throw new Error("Too many WebSocket frames in one read.");
+    }
+
     const first = buffer[offset];
     const second = buffer[offset + 1];
+    const finished = Boolean(first & 0x80);
+    const reservedBits = first & 0x70;
     const opcode = first & 0x0f;
     const masked = Boolean(second & 0x80);
     let length = second & 0x7f;
     let headerLength = 2;
+
+    if (!finished || reservedBits !== 0) {
+      throw new Error("Unsupported WebSocket frame.");
+    }
+
+    if (!masked) {
+      throw new Error("Client WebSocket frames must be masked.");
+    }
 
     if (length === 126) {
       if (offset + 4 > buffer.length) {
@@ -70,17 +196,31 @@ function decodeFrames(buffer: Buffer<ArrayBufferLike>): { messages: string[]; re
         break;
       }
       const bigLength = buffer.readBigUInt64BE(offset + 2);
-      if (bigLength > BigInt(Number.MAX_SAFE_INTEGER)) {
-        throw new Error("Frame is too large.");
+      if (bigLength > BigInt(MAX_REMOTE_MESSAGE_BYTES)) {
+        throw new Error("WebSocket frame is too large.");
       }
       length = Number(bigLength);
       headerLength = 10;
     }
 
-    const maskLength = masked ? 4 : 0;
+    if (length > MAX_REMOTE_MESSAGE_BYTES) {
+      throw new Error("WebSocket frame is too large.");
+    }
+
+    if ((opcode === 0x8 || opcode === 0x9 || opcode === 0xa) && length > 125) {
+      throw new Error("Invalid WebSocket control frame.");
+    }
+
+    const maskLength = 4;
     const frameEnd = offset + headerLength + maskLength + length;
     if (frameEnd > buffer.length) {
       break;
+    }
+
+    const mask = buffer.subarray(offset + headerLength, offset + headerLength + 4);
+    const payload = Buffer.from(buffer.subarray(offset + headerLength + maskLength, frameEnd));
+    for (let index = 0; index < payload.length; index += 1) {
+      payload[index] ^= mask[index % 4];
     }
 
     if (opcode === 0x8) {
@@ -88,31 +228,46 @@ function decodeFrames(buffer: Buffer<ArrayBufferLike>): { messages: string[]; re
     }
 
     if (opcode === 0x1) {
-      const mask = masked ? buffer.subarray(offset + headerLength, offset + headerLength + 4) : null;
-      const payload = Buffer.from(buffer.subarray(offset + headerLength + maskLength, frameEnd));
-      if (mask) {
-        for (let index = 0; index < payload.length; index += 1) {
-          payload[index] ^= mask[index % 4];
-        }
-      }
       messages.push(payload.toString("utf8"));
+    } else if (opcode === 0x9) {
+      pings.push(payload);
+    } else if (opcode !== 0xa) {
+      throw new Error("Unsupported WebSocket opcode.");
     }
 
     offset = frameEnd;
   }
 
-  return { messages, remaining: buffer.subarray(offset) };
+  return { messages, pings, remaining: buffer.subarray(offset) };
 }
 
-export function handleUpgrade(request: IncomingMessage, socket: Socket): void {
+export function handleUpgrade(request: IncomingMessage, socket: Socket, head: Buffer = Buffer.alloc(0)): void {
   if (request.url !== "/ws") {
-    socket.destroy();
+    rejectUpgrade(socket, 404, "Not Found");
     return;
   }
 
-  const key = request.headers["sec-websocket-key"];
-  if (typeof key !== "string") {
-    socket.destroy();
+  if (
+    request.method !== "GET" ||
+    !headerIncludesToken(request.headers.upgrade, "websocket") ||
+    !headerIncludesToken(request.headers.connection, "upgrade") ||
+    request.headers["sec-websocket-version"] !== "13" ||
+    !isAllowedWebSocketOrigin(typeof request.headers.origin === "string" ? request.headers.origin : undefined)
+  ) {
+    rejectUpgrade(socket, 403, "Forbidden");
+    return;
+  }
+
+  const keyHeader = request.headers["sec-websocket-key"];
+  const key = Array.isArray(keyHeader) ? keyHeader[0] : keyHeader;
+  if (!isValidWebSocketKey(key)) {
+    rejectUpgrade(socket, 400, "Bad Request");
+    return;
+  }
+
+  const clientKey = getClientIp(request);
+  if (!reserveConnection(clientKey)) {
+    rejectUpgrade(socket, 429, "Too Many Requests");
     return;
   }
 
@@ -126,12 +281,16 @@ export function handleUpgrade(request: IncomingMessage, socket: Socket): void {
       "Upgrade: websocket",
       "Connection: Upgrade",
       `Sec-WebSocket-Accept: ${accept}`,
+      "Cache-Control: no-store",
       "",
       ""
     ].join("\r\n")
   );
 
+  socket.setNoDelay(true);
+
   let buffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+  let released = false;
   const context: ClientContext = {
     authenticated: false,
     role: null,
@@ -148,11 +307,37 @@ export function handleUpgrade(request: IncomingMessage, socket: Socket): void {
     }
   };
 
-  socket.on("data", (chunk) => {
+  const release = () => {
+    if (released) {
+      return;
+    }
+    released = true;
+    releaseConnection(clientKey);
+    if (context.authenticated) {
+      removeConnection(context.connection);
+    }
+  };
+
+  const authTimer = setTimeout(() => {
+    if (!context.authenticated) {
+      closeSocket(socket);
+    }
+  }, AUTH_TIMEOUT_MS);
+  authTimer.unref();
+
+  const onData = (chunk: Buffer) => {
     try {
+      if (chunk.length > MAX_SOCKET_BUFFER_BYTES || buffer.length + chunk.length > MAX_SOCKET_BUFFER_BYTES) {
+        throw new Error("WebSocket buffer limit exceeded.");
+      }
+
       buffer = Buffer.concat([buffer, chunk]);
       const decoded = decodeFrames(buffer);
       buffer = decoded.remaining;
+
+      for (const ping of decoded.pings) {
+        writeServerFrame(socket, 0xa, ping);
+      }
 
       for (const raw of decoded.messages) {
         const message = parseRemoteMessage(raw);
@@ -176,15 +361,12 @@ export function handleUpgrade(request: IncomingMessage, socket: Socket): void {
             return;
           }
 
+          clearTimeout(authTimer);
           context.session = auth.session;
           context.role = message.role;
           context.authenticated = true;
           context.connection.send({ type: "AUTH_OK", role: message.role, expiresAt: new Date(auth.session.expiresAtMs).toISOString() });
 
-          // A Manifest V3 background service worker can reconnect independently of the phone.
-          // If the controller WebSocket is still authenticated, immediately restore the
-          // desktop-side connected state and restart player-state polling. Without this,
-          // the extension incorrectly waits for a phone reconnect that already happened.
           if (message.role === "player" && auth.session.controller) {
             context.connection.send({ type: "CONTROLLER_CONNECTED" });
           }
@@ -219,8 +401,19 @@ export function handleUpgrade(request: IncomingMessage, socket: Socket): void {
     } catch {
       closeSocket(socket);
     }
+  };
+
+  socket.on("data", onData);
+  socket.once("close", () => {
+    clearTimeout(authTimer);
+    release();
+  });
+  socket.once("error", () => {
+    clearTimeout(authTimer);
+    release();
   });
 
-  socket.on("close", () => removeConnection(context.connection));
-  socket.on("error", () => removeConnection(context.connection));
+  if (head.length > 0) {
+    onData(head);
+  }
 }

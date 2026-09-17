@@ -32,6 +32,7 @@ const sessionLifetimeMs = 4 * 60 * 60 * 1000;
 const commandWindowMs = 1000;
 const maxCommandsPerWindow = 20;
 const developmentPublicOrigin = "http://localhost:8787";
+export const MAX_ACTIVE_SESSIONS = 500;
 
 const sessions = new Map<string, RemoteSession>();
 
@@ -91,6 +92,11 @@ export function createControllerUrl(sessionId: string, controllerToken: string, 
 }
 
 export function createSession(now = Date.now(), publicOrigin = developmentPublicOrigin, options: CreateSessionOptions = {}): SessionTokens {
+  sweepExpiredSessions(now);
+  if (sessions.size >= MAX_ACTIVE_SESSIONS) {
+    throw new Error("ChromeRemote has reached the maximum number of active sessions.");
+  }
+
   const sessionId = randomBytes(16).toString("base64url");
   const playerToken = createSecret();
   const controllerToken = createSecret();
@@ -129,8 +135,24 @@ export function getSession(sessionId: string): RemoteSession | null {
   return session;
 }
 
+export function getActiveSessionCount(): number {
+  return sessions.size;
+}
+
 export function isExpired(session: RemoteSession, now = Date.now()): boolean {
   return session.ended || session.expiresAtMs <= now;
+}
+
+export function sweepExpiredSessions(now = Date.now()): number {
+  let removed = 0;
+  for (const [sessionId, session] of sessions) {
+    if (isExpired(session, now)) {
+      expireSession(sessionId);
+      removed += 1;
+    }
+  }
+
+  return removed;
 }
 
 export function authenticate(sessionId: string, role: RemoteRole, token: string, connection: SessionConnection): { ok: true; session: RemoteSession } | { ok: false; errorCode: RemoteErrorCode; message: string } {
