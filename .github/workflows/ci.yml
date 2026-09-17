@@ -36,6 +36,9 @@ jobs:
       - name: Typecheck
         run: npm run lint
 
+      - name: Build extension test artifact
+        run: npm run build:extension
+
       - name: Run tests
         run: npm test
 
